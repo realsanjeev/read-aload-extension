@@ -243,7 +243,8 @@ function initializePlayer(text) {
   }
   const sentenceRegex = /[^.!?]+[.!?]+["']?|[^.!?]+$/g;
   playerState.sentences = text.match(sentenceRegex) || [text];
-  playerState.sentences = playerState.sentences.map(s => s.trim()).filter(s => s.length > 0);
+  // Filter empty only, do not trim away structural newlines
+  playerState.sentences = playerState.sentences.filter(s => s.trim().length > 0);
   renderSentences();
   updateProgress();
 }
