@@ -22,6 +22,9 @@ const rateRange = document.getElementById('rateRange');
 const rateValue = document.getElementById('rateValue');
 const pitchRange = document.getElementById('pitchRange');
 const pitchValue = document.getElementById('pitchValue');
+// New Volume Elements
+const volumeRange = document.getElementById('volumeRange');
+const volumeValue = document.getElementById('volumeValue');
 
 // --- Global State ---
 let playerState = {
@@ -33,7 +36,8 @@ let playerState = {
   settings: {
     voiceName: null,
     rate: 1.0,
-    pitch: 1.0
+    pitch: 1.0,
+    volume: 1.0
   }
 };
 
@@ -65,16 +69,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 // --- Settings Logic ---
 
 async function loadSettings() {
-  const data = await chrome.storage.sync.get(['voiceName', 'rate', 'pitch']);
+  const data = await chrome.storage.sync.get(['voiceName', 'rate', 'pitch', 'volume']);
   playerState.settings.voiceName = data.voiceName || null;
   playerState.settings.rate = parseFloat(data.rate) || 1.0;
   playerState.settings.pitch = parseFloat(data.pitch) || 1.0;
+  playerState.settings.volume = parseFloat(data.volume) || 1.0;
 
   // Update UI
   rateRange.value = playerState.settings.rate;
   rateValue.textContent = playerState.settings.rate + "x";
   pitchRange.value = playerState.settings.pitch;
   pitchValue.textContent = playerState.settings.pitch;
+
+  if (volumeRange && volumeValue) {
+    volumeRange.value = playerState.settings.volume;
+    volumeValue.textContent = playerState.settings.volume;
+  }
 }
 
 function saveSettings() {
@@ -82,7 +92,8 @@ function saveSettings() {
   chrome.storage.sync.set({
     voiceName: s.voiceName,
     rate: s.rate,
-    pitch: s.pitch
+    pitch: s.pitch,
+    volume: s.volume
   });
 }
 
@@ -91,24 +102,40 @@ function populateVoices() {
   voiceSelect.innerHTML = '';
 
   let selectedIndex = 0;
+  let googleEnglishIndex = -1;
+  let defaultIndex = -1;
 
   voices.forEach((voice, i) => {
     const option = document.createElement('option');
     option.textContent = `${voice.name} (${voice.lang})`;
     option.value = voice.name;
 
+    // Prioritize Google English
+    if (voice.name.includes("Google") && (voice.lang === 'en-US' || voice.lang === 'en_US')) {
+      googleEnglishIndex = i;
+    }
+    if (voice.default) {
+      defaultIndex = i;
+    }
+
     if (voice.name === playerState.settings.voiceName) {
-      selectedIndex = i;
-    } else if (!playerState.settings.voiceName && voice.default) {
       selectedIndex = i;
     }
 
     voiceSelect.appendChild(option);
   });
 
+  // Default Selection Logic
+  if (!playerState.settings.voiceName) {
+    if (googleEnglishIndex !== -1) {
+      selectedIndex = googleEnglishIndex;
+    } else if (defaultIndex !== -1) {
+      selectedIndex = defaultIndex;
+    }
+  }
+
   voiceSelect.selectedIndex = selectedIndex;
-  // ensure state matches default if not set
-  if (!playerState.settings.voiceName && voices.length > 0) {
+  if (voices.length > 0) {
     playerState.settings.voiceName = voices[selectedIndex].name;
   }
 }
@@ -131,6 +158,15 @@ pitchRange.oninput = (e) => {
   saveSettings();
 };
 
+if (volumeRange) {
+  volumeRange.oninput = (e) => {
+    const val = parseFloat(e.target.value);
+    playerState.settings.volume = val;
+    volumeValue.textContent = val;
+    saveSettings();
+  };
+}
+
 voiceSelect.onchange = (e) => {
   playerState.settings.voiceName = e.target.value;
   saveSettings();
@@ -139,18 +175,23 @@ voiceSelect.onchange = (e) => {
 btnReset.onclick = () => {
   playerState.settings.rate = 1.0;
   playerState.settings.pitch = 1.0;
-  playerState.settings.voiceName = null; // Reset to default
+  playerState.settings.volume = 1.0;
+  playerState.settings.voiceName = null; // Reset to allow auto-finding
 
   rateRange.value = 1.0;
   rateValue.textContent = "1.0x";
   pitchRange.value = 1.0;
   pitchValue.textContent = "1.0";
+  if (volumeRange) {
+    volumeRange.value = 1.0;
+    volumeValue.textContent = "1.0";
+  }
 
-  populateVoices(); // Reselect default
+  populateVoices();
   saveSettings();
 };
 
-// --- Text Extraction (Copied from Phase 2/3) ---
+// --- Text Extraction ---
 async function getPageContent() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('edge://')) {
@@ -193,7 +234,7 @@ function extractContentFromPage() {
   }
 }
 
-// --- Player Logic (Updated for Settings) ---
+// --- Player Logic ---
 
 function initializePlayer(text) {
   if (!text || text.trim().length === 0) {
@@ -256,6 +297,8 @@ function speakCurrentSentence() {
   // Apply Settings
   utter.rate = playerState.settings.rate;
   utter.pitch = playerState.settings.pitch;
+  utter.volume = playerState.settings.volume;
+
   if (playerState.settings.voiceName) {
     const v = voices.find(voice => voice.name === playerState.settings.voiceName);
     if (v) utter.voice = v;
