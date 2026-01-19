@@ -1,222 +1,155 @@
-let synth = window.speechSynthesis;
-let voices = [];
+// popup.js - Phase 2: Intelligent Text Extraction
 
-// DOM Elements
-const voiceSelect = document.querySelector('#voiceSelect');
-const rateInput = document.querySelector('#rate');
-const pitchInput = document.querySelector('#pitch');
-const volumeInput = document.querySelector('#volume');
-const playBtn = document.querySelector('#play');
-const testBtn = document.querySelector('#testSettings');
-const resetBtn = document.querySelector('#resetSettings');
+console.log("Popup loaded. Phase 2: Text Extraction Active.");
 
-const TEST_PHRASE = "Hello, I am reading for text tfile for testing the changed setting.";
+// --- DOM Elements ---
+const btnPlay = document.getElementById('btnPlay');
+const btnStop = document.getElementById('btnStop');
+const btnPrev = document.getElementById('btnPrev');
+const btnNext = document.getElementById('btnNext');
+const btnSettings = document.getElementById('btnSettings');
+const textContent = document.getElementById('textArea');
+// Placeholder icons (we'll toggle these in Phase 3 fully, but basic toggle here)
+const iconPlay = document.getElementById('iconPlay');
+const iconPause = document.getElementById('iconPause');
 
-const rateVal = document.querySelector('#rateVal');
-const pitchVal = document.querySelector('#pitchVal');
-const volumeVal = document.querySelector('#volumeVal');
+// --- Global State ---
+let currentText = "";
 
-// 1. SET DEFAULTS
-const DEFAULTS = {
-  rate: 1,
-  pitch: 1,
-  volume: 1,
-  voiceName: "" // Will be determined by en-US logic if empty
-};
-
-
-// Function to update the "x" labels
-function updateLabels() {
-  const settings = [
-    { input: rateInput, label: rateVal, def: DEFAULTS.rate },
-    { input: pitchInput, label: pitchVal, def: DEFAULTS.pitch },
-    { input: volumeInput, label: volumeVal, def: DEFAULTS.volume }
-  ];
-
-  settings.forEach(s => {
-    const val = parseFloat(s.input.value).toFixed(1);
-    s.label.textContent = `${val}x`;
-    
-    // Highlight if different from default
-    if (val != s.def.toFixed(1)) {
-      s.label.classList.add('changed');
-    } else {
-      s.label.classList.remove('changed');
-    }
-  });
-}
-
-// Update loadSettings to trigger label update
-async function loadSettings() {
-  const data = await chrome.storage.sync.get(['rate', 'pitch', 'volume', 'voiceName']);
-  rateInput.value = data.rate || DEFAULTS.rate;
-  pitchInput.value = data.pitch || DEFAULTS.pitch;
-  volumeInput.value = data.volume || DEFAULTS.volume;
-  updateLabels(); // Update labels after loading
-  return data.voiceName || "";
-}
-
-// Add event listeners to update labels while sliding
-[rateInput, pitchInput, volumeInput].forEach(el => {
-  el.oninput = () => {
-    updateLabels();
-    saveSettings();
-  };
+// --- Initialization ---
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    const text = await getPageContent();
+    loadTextIntoUI(text);
+  } catch (err) {
+    console.error("Failed to get content:", err);
+    textContent.innerHTML = `<p class="error">Could not read page content: ${err.message}</p>`;
+  }
 });
 
-// Update Reset Logic to clear labels
-resetBtn.onclick = () => {
-  rateInput.value = DEFAULTS.rate;
-  pitchInput.value = DEFAULTS.pitch;
-  volumeInput.value = DEFAULTS.volume;
-  updateLabels();
-  
-  chrome.storage.sync.remove(['rate', 'pitch', 'volume', 'voiceName'], () => {
-    populateVoiceList();
-  });
-};
-// Function to update the "x" labels
-function updateLabels() {
-  const settings = [
-    { input: rateInput, label: rateVal, def: DEFAULTS.rate },
-    { input: pitchInput, label: pitchVal, def: DEFAULTS.pitch },
-    { input: volumeInput, label: volumeVal, def: DEFAULTS.volume }
-  ];
+// --- Core Logic: Text Extraction ---
 
-  settings.forEach(s => {
-    const val = parseFloat(s.input.value).toFixed(1);
-    s.label.textContent = `${val}x`;
-    
-    // Highlight if different from default
-    if (val != s.def.toFixed(1)) {
-      s.label.classList.add('changed');
-    } else {
-      s.label.classList.remove('changed');
-    }
-  });
-}
-
-// Update loadSettings to trigger label update
-async function loadSettings() {
-  const data = await chrome.storage.sync.get(['rate', 'pitch', 'volume', 'voiceName']);
-  rateInput.value = data.rate || DEFAULTS.rate;
-  pitchInput.value = data.pitch || DEFAULTS.pitch;
-  volumeInput.value = data.volume || DEFAULTS.volume;
-  updateLabels(); // Update labels after loading
-  return data.voiceName || "";
-}
-
-// Add event listeners to update labels while sliding
-[rateInput, pitchInput, volumeInput].forEach(el => {
-  el.oninput = () => {
-    updateLabels();
-    saveSettings();
-  };
-});
-
-// Update Reset Logic to clear labels
-resetBtn.onclick = () => {
-  rateInput.value = DEFAULTS.rate;
-  pitchInput.value = DEFAULTS.pitch;
-  volumeInput.value = DEFAULTS.volume;
-  updateLabels();
-  
-  chrome.storage.sync.remove(['rate', 'pitch', 'volume', 'voiceName'], () => {
-    populateVoiceList();
-  });
-};
-// 3. SAVE SETTINGS TO STORAGE
-function saveSettings() {
-  chrome.storage.sync.set({
-    rate: rateInput.value,
-    pitch: pitchInput.value,
-    volume: volumeInput.value,
-    voiceName: voiceSelect.value
-  });
-}
-
-// 4. POPULATE VOICES & SELECT SAVED/DEFAULT
-async function populateVoiceList() {
-  voices = synth.getVoices();
-  const savedVoiceName = await loadSettings();
-  
-  voiceSelect.innerHTML = '';
-  let autoSelectIndex = 0;
-
-  voices.forEach((voice, i) => {
-    const option = document.createElement('option');
-    option.textContent = `${voice.name} (${voice.lang})`;
-    option.value = voice.name; // Use name as unique ID
-    
-    // Priority 1: Previously saved voice
-    if (voice.name === savedVoiceName) {
-      autoSelectIndex = i;
-    } 
-    // Priority 2: en-US default (only if no saved voice matches)
-    else if (!savedVoiceName && (voice.lang === 'en-US' || voice.lang === 'en_US')) {
-       if (voice.default || autoSelectIndex === 0) autoSelectIndex = i;
-    }
-
-    voiceSelect.appendChild(option);
-  });
-
-  voiceSelect.selectedIndex = autoSelectIndex;
-}
-
-// Initialization
-if (speechSynthesis.onvoiceschanged !== undefined) {
-  speechSynthesis.onvoiceschanged = populateVoiceList;
-}
-populateVoiceList();
-
-// Listen for any UI changes to save automatically
-[rateInput, pitchInput, volumeInput, voiceSelect].forEach(el => {
-  el.onchange = saveSettings;
-});
-
-// RESET LOGIC
-resetBtn.onclick = () => {
-  rateInput.value = DEFAULTS.rate;
-  pitchInput.value = DEFAULTS.pitch;
-  volumeInput.value = DEFAULTS.volume;
-  
-  // Re-run voice selection logic to find en-US default
-  chrome.storage.sync.remove(['rate', 'pitch', 'volume', 'voiceName'], () => {
-    populateVoiceList();
-  });
-};
-
-// HELPER: Create Utterance with current UI values
-function createUtterance(text) {
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.voice = voices.find(v => v.name === voiceSelect.value);
-  utter.rate = rateInput.value;
-  utter.pitch = pitchInput.value;
-  utter.volume = volumeInput.value;
-  return utter;
-}
-
-// Playback Controls
-testBtn.onclick = () => {
-  synth.cancel();
-  synth.speak(createUtterance(TEST_PHRASE));
-};
-
-playBtn.onclick = async () => {
+/**
+ * Injects a script into the active tab to scrape the best available text.
+ */
+async function getPageContent() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+  // Safety check for restricted pages (chrome:// etc)
+  if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('edge://')) {
+    return "Cannot read this internal browser page.";
+  }
+
   const results = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
-    func: () => window.getSelection().toString(),
+    func: extractContentFromPage
   });
-  
-  const text = results[0].result;
-  if (!text) return alert("Please highlight text first!");
 
-  synth.cancel();
-  synth.speak(createUtterance(text));
-};
+  if (!results || !results[0] || !results[0].result) {
+    throw new Error("No content found.");
+  }
 
-document.querySelector('#pause').onclick = () => {
-  if (synth.speaking) synth.paused ? synth.resume() : synth.pause();
-};
-document.querySelector('#stop').onclick = () => synth.cancel();
+  return results[0].result;
+}
+
+/**
+ * This function runs INSIDE the web page context (Content Script).
+ * It attempts to find the "main" content of the page.
+ */
+function extractContentFromPage() {
+  // 1. Check for user selection first
+  const selection = window.getSelection().toString().trim();
+  if (selection.length > 0) {
+    return selection;
+  }
+
+  // 2. Readability-style heuristics (Simplified)
+  // Try to find <article>, <main>, or likely containers
+  const selectors = [
+    'article',
+    'main',
+    '[role="main"]',
+    '.post-content',
+    '.article-body',
+    '.content',
+    '#content'
+  ];
+
+  let contentNode = null;
+
+  for (const selector of selectors) {
+    const node = document.querySelector(selector);
+    // Basic validation: ensure it has enough text
+    if (node && node.innerText.length > 200) {
+      contentNode = node;
+      break;
+    }
+  }
+
+  // 3. Fallback: Parse Body (smartly)
+  if (!contentNode) {
+    contentNode = document.body;
+  }
+
+  // 4. Transform contentNode into clean text
+  // We want to capture paragraphs to maintain structure
+  if (!contentNode) return "";
+
+  // Helper to clean and extract text from a node
+  // We select specific block elements to avoid menus/footer junk if we grabbed <body>
+  const blockElements = contentNode.querySelectorAll('p, h1, h2, h3, h4, h5, li');
+
+  // If we found specific blocks, use them. Otherwise, dump innerText.
+  if (blockElements.length > 0) {
+    let textParts = [];
+    blockElements.forEach(el => {
+      const text = el.innerText.trim();
+      // Filter out short/empty garbage (like menu items or empty P tags)
+      if (text.length > 20) {
+        textParts.push(text);
+      }
+    });
+    return textParts.join("\n\n");
+  } else {
+    return contentNode.innerText;
+  }
+}
+
+// --- UI Logic ---
+
+/**
+ * Displays the extracted text in the popup interface.
+ */
+function loadTextIntoUI(text) {
+  if (!text || text.trim().length === 0) {
+    textContent.innerHTML = '<p class="placeholder-text">No readable text found on this page.</p>';
+    return;
+  }
+
+  currentText = text;
+
+  // Simple display for Phase 2. 
+  // In Phase 3, we will split this into <span> sentences for Highlighting.
+  // Converting newlines to <br> for better readability in the preview.
+  textContent.innerText = text; // Securely set text first
+  textContent.innerHTML = textContent.innerText.replace(/\n\n/g, '<br><br>');
+}
+
+
+// --- Placeholder Event Listeners (Phase 1/2) ---
+if (btnPlay) {
+  btnPlay.addEventListener('click', () => {
+    // Toggle Icon
+    // Real playback logic coming in Phase 3
+    const isPlaying = iconPlay.classList.contains('hidden');
+    if (!isPlaying) {
+      iconPlay.classList.add('hidden');
+      iconPause.classList.remove('hidden');
+      console.log("Simulating Play: ", currentText.substring(0, 50) + "...");
+    } else {
+      iconPlay.classList.remove('hidden');
+      iconPause.classList.add('hidden');
+      console.log("Simulating Pause");
+    }
+  });
+}
