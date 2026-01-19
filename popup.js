@@ -1,6 +1,6 @@
-// popup.js - Phase 3: Advanced Player & Karaoke
+// popup.js - Phase 4: Full Features (Player + Settings)
 
-console.log("Popup loaded. Phase 3: Advanced Player Active.");
+console.log("Popup loaded. Phase 4: Full Features.");
 
 // --- DOM Elements ---
 const btnPlay = document.getElementById('btnPlay');
@@ -8,10 +8,20 @@ const btnStop = document.getElementById('btnStop');
 const btnPrev = document.getElementById('btnPrev');
 const btnNext = document.getElementById('btnNext');
 const btnSettings = document.getElementById('btnSettings');
+const btnCloseSettings = document.getElementById('btnCloseSettings');
+const btnReset = document.getElementById('btnReset');
+
 const textContent = document.getElementById('textArea');
 const progressBar = document.getElementById('progressBar');
 const iconPlay = document.getElementById('iconPlay');
 const iconPause = document.getElementById('iconPause');
+
+const settingsPanel = document.getElementById('settingsPanel');
+const voiceSelect = document.getElementById('voiceSelect');
+const rateRange = document.getElementById('rateRange');
+const rateValue = document.getElementById('rateValue');
+const pitchRange = document.getElementById('pitchRange');
+const pitchValue = document.getElementById('pitchValue');
 
 // --- Global State ---
 let playerState = {
@@ -19,14 +29,30 @@ let playerState = {
   isPaused: false,
   sentences: [],
   currentIndex: 0,
-  utterance: null
+  utterance: null,
+  settings: {
+    voiceName: null,
+    rate: 1.0,
+    pitch: 1.0
+  }
 };
+
+let voices = [];
 
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', async () => {
-  // Clear any residual synthesis
   window.speechSynthesis.cancel();
 
+  // Load settings first
+  await loadSettings();
+
+  // Populate voices (wait for them to be ready)
+  if (speechSynthesis.onvoiceschanged !== undefined) {
+    speechSynthesis.onvoiceschanged = populateVoices;
+  }
+  populateVoices();
+
+  // Load Content
   try {
     const rawText = await getPageContent();
     initializePlayer(rawText);
@@ -36,7 +62,95 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
-// --- Core Logic: Text Extraction (Phase 2) ---
+// --- Settings Logic ---
+
+async function loadSettings() {
+  const data = await chrome.storage.sync.get(['voiceName', 'rate', 'pitch']);
+  playerState.settings.voiceName = data.voiceName || null;
+  playerState.settings.rate = parseFloat(data.rate) || 1.0;
+  playerState.settings.pitch = parseFloat(data.pitch) || 1.0;
+
+  // Update UI
+  rateRange.value = playerState.settings.rate;
+  rateValue.textContent = playerState.settings.rate + "x";
+  pitchRange.value = playerState.settings.pitch;
+  pitchValue.textContent = playerState.settings.pitch;
+}
+
+function saveSettings() {
+  const s = playerState.settings;
+  chrome.storage.sync.set({
+    voiceName: s.voiceName,
+    rate: s.rate,
+    pitch: s.pitch
+  });
+}
+
+function populateVoices() {
+  voices = window.speechSynthesis.getVoices();
+  voiceSelect.innerHTML = '';
+
+  let selectedIndex = 0;
+
+  voices.forEach((voice, i) => {
+    const option = document.createElement('option');
+    option.textContent = `${voice.name} (${voice.lang})`;
+    option.value = voice.name;
+
+    if (voice.name === playerState.settings.voiceName) {
+      selectedIndex = i;
+    } else if (!playerState.settings.voiceName && voice.default) {
+      selectedIndex = i;
+    }
+
+    voiceSelect.appendChild(option);
+  });
+
+  voiceSelect.selectedIndex = selectedIndex;
+  // ensure state matches default if not set
+  if (!playerState.settings.voiceName && voices.length > 0) {
+    playerState.settings.voiceName = voices[selectedIndex].name;
+  }
+}
+
+// UI Event Listeners for Settings
+btnSettings.onclick = () => settingsPanel.classList.remove('hidden');
+btnCloseSettings.onclick = () => settingsPanel.classList.add('hidden');
+
+rateRange.oninput = (e) => {
+  const val = parseFloat(e.target.value);
+  playerState.settings.rate = val;
+  rateValue.textContent = val + "x";
+  saveSettings();
+};
+
+pitchRange.oninput = (e) => {
+  const val = parseFloat(e.target.value);
+  playerState.settings.pitch = val;
+  pitchValue.textContent = val;
+  saveSettings();
+};
+
+voiceSelect.onchange = (e) => {
+  playerState.settings.voiceName = e.target.value;
+  saveSettings();
+};
+
+btnReset.onclick = () => {
+  playerState.settings.rate = 1.0;
+  playerState.settings.pitch = 1.0;
+  playerState.settings.voiceName = null; // Reset to default
+
+  rateRange.value = 1.0;
+  rateValue.textContent = "1.0x";
+  pitchRange.value = 1.0;
+  pitchValue.textContent = "1.0";
+
+  populateVoices(); // Reselect default
+  saveSettings();
+};
+
+// --- Text Extraction (Copied from Phase 2/3) ---
 async function getPageContent() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('edge://')) {
@@ -79,25 +193,16 @@ function extractContentFromPage() {
   }
 }
 
-// --- Player Logic (Phase 3) ---
+// --- Player Logic (Updated for Settings) ---
 
 function initializePlayer(text) {
   if (!text || text.trim().length === 0) {
     textContent.innerHTML = '<p class="placeholder-text">No readable text found.</p>';
     return;
   }
-
-  // Split text into sentences using basic punctuation heuristics
-  // We use lookbehind (?) to keep the punctuation
-  // Simplest regex for Phase 3: Split by (.!?) followed by space or end of string
   const sentenceRegex = /[^.!?]+[.!?]+["']?|[^.!?]+$/g;
   playerState.sentences = text.match(sentenceRegex) || [text];
-
-  // Clean up sentences
-  playerState.sentences = playerState.sentences
-    .map(s => s.trim())
-    .filter(s => s.length > 0);
-
+  playerState.sentences = playerState.sentences.map(s => s.trim()).filter(s => s.length > 0);
   renderSentences();
   updateProgress();
 }
@@ -106,24 +211,17 @@ function renderSentences() {
   textContent.innerHTML = "";
   playerState.sentences.forEach((sentence, index) => {
     const span = document.createElement('span');
-    span.textContent = sentence + " "; // Add space for readability
+    span.textContent = sentence + " ";
     span.id = `sentence-${index}`;
     span.dataset.index = index;
-
-    // Add click-to-play functionality
-    span.onclick = () => {
-      playFromIndex(index);
-    };
+    span.onclick = () => playFromIndex(index);
     span.style.cursor = "pointer";
-
     textContent.appendChild(span);
   });
 }
 
 function highlightCurrentSentence() {
-  // Remove previous highlights
   document.querySelectorAll('.highlight').forEach(el => el.classList.remove('highlight'));
-
   const currentId = `sentence-${playerState.currentIndex}`;
   const el = document.getElementById(currentId);
   if (el) {
@@ -144,10 +242,9 @@ function speakCurrentSentence() {
     return;
   }
 
-  window.speechSynthesis.cancel(); // Clear previous utterance
+  window.speechSynthesis.cancel();
 
   const text = playerState.sentences[playerState.currentIndex];
-  // Simple check to skip empty nonsense
   if (!text || text.trim().length === 0) {
     playerState.currentIndex++;
     speakCurrentSentence();
@@ -156,8 +253,13 @@ function speakCurrentSentence() {
 
   const utter = new SpeechSynthesisUtterance(text);
 
-  // Basic settings (Phase 4 will add UI for this)
-  utter.rate = 1.0;
+  // Apply Settings
+  utter.rate = playerState.settings.rate;
+  utter.pitch = playerState.settings.pitch;
+  if (playerState.settings.voiceName) {
+    const v = voices.find(voice => voice.name === playerState.settings.voiceName);
+    if (v) utter.voice = v;
+  }
 
   utter.onstart = () => {
     highlightCurrentSentence();
@@ -165,10 +267,6 @@ function speakCurrentSentence() {
   };
 
   utter.onend = () => {
-    // Check if we should proceed (only if still playing and not paused)
-    // Note: onend can fire when we manually cancel() too, so we need to be careful.
-    // If we are isPlaying=true, it means we finished naturally or skipped.
-    // However, if we call cancel() in stop(), isPlaying becomes false.
     if (playerState.isPlaying && !playerState.isPaused) {
       playerState.currentIndex++;
       speakCurrentSentence();
@@ -177,8 +275,6 @@ function speakCurrentSentence() {
 
   utter.onerror = (e) => {
     console.error("Speech Error:", e);
-    // If interrupted, don't auto-advance. If actual error, auto-advance?
-    // 'interrupted' happens on .cancel()
     if (e.error !== 'interrupted' && e.error !== 'canceled') {
       if (playerState.isPlaying) {
         playerState.currentIndex++;
@@ -194,7 +290,6 @@ function speakCurrentSentence() {
 // --- Controls ---
 
 function playFromIndex(index) {
-  // Stop current logic to reset state cleanly
   window.speechSynthesis.cancel();
   playerState.currentIndex = index;
   play();
@@ -202,14 +297,9 @@ function playFromIndex(index) {
 
 function play() {
   if (playerState.sentences.length === 0) return;
-
   playerState.isPlaying = true;
   playerState.isPaused = false;
   togglePlayIcon(true);
-
-  // If we were paused, resume. But wait, we are managing queue manually.
-  // Using .resume() is flaky with detailed highlighting sync.
-  // Better to restart the current sentence from scratch for better sync.
   speakCurrentSentence();
 }
 
@@ -217,7 +307,7 @@ function pause() {
   playerState.isPlaying = false;
   playerState.isPaused = true;
   togglePlayIcon(false);
-  window.speechSynthesis.cancel(); // Better than pause() for granular control
+  window.speechSynthesis.cancel();
 }
 
 function stop() {
@@ -226,8 +316,6 @@ function stop() {
   playerState.currentIndex = 0;
   togglePlayIcon(false);
   window.speechSynthesis.cancel();
-
-  // Reset UI
   document.querySelectorAll('.highlight').forEach(el => el.classList.remove('highlight'));
   progressBar.style.width = '0%';
 }
@@ -267,13 +355,10 @@ function togglePlayIcon(isPlaying) {
 }
 
 // --- Event Listeners ---
-if (btnPlay) {
-  btnPlay.onclick = () => {
-    if (playerState.isPlaying) pause();
-    else play();
-  };
-}
-if (btnStop) btnStop.onclick = stop;
-if (btnNext) btnNext.onclick = next;
-if (btnPrev) btnPrev.onclick = prev;
-if (btnSettings) btnSettings.onclick = () => alert("Settings coming in Phase 4!");
+btnPlay.onclick = () => {
+  if (playerState.isPlaying) pause();
+  else play();
+};
+btnStop.onclick = stop;
+btnNext.onclick = next;
+btnPrev.onclick = prev;

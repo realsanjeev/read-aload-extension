@@ -33,6 +33,37 @@
       </div>
     </main>
 
+    <!-- Settings Panel (Overlay) -->
+    <div id="settingsPanel" class="settings-panel hidden">
+      <div class="settings-header">
+        <h3>Settings</h3>
+        <button id="btnCloseSettings" class="icon-btn sm">
+          <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="setting-item">
+        <label>Voice</label>
+        <select id="voiceSelect" class="form-select"></select>
+      </div>
+
+      <div class="setting-item">
+        <label>Speed: <span id="rateValue">1.0x</span></label>
+        <input type="range" id="rateRange" min="0.5" max="3.0" step="0.1" value="1.0">
+      </div>
+
+      <div class="setting-item">
+        <label>Pitch: <span id="pitchValue">1.0</span></label>
+        <input type="range" id="pitchRange" min="0.5" max="2.0" step="0.1" value="1.0">
+      </div>
+
+      <button id="btnReset" class="text-btn">Reset Defaults</button>
+    </div>
+
     <!-- Player Controls -->
     <footer class="player-controls">
       <!-- Progress Bar -->
