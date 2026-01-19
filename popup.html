@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h3>Speak-Aloud</h3>
+  
+  <div class="controls">
+    <button id="play" class="primary-btn">Play Selected</button>
+    <button id="pause">Pause/Resume</button>
+    <button id="stop">Stop</button>
+  </div>
+
+  <hr>
+  <div class="settings">
+    <label>Voice:</label>
+    <select id="voiceSelect"></select>
+
+    <label>Speed (Rate): <span id="rateVal" class="val-label">1.0x</span></label>
+    <input type="range" id="rate" min="0.5" max="2" step="0.1" value="1">
+    
+    <label>Pitch: <span id="pitchVal" class="val-label">1.0x</span></label>
+    <input type="range" id="pitch" min="0" max="2" step="0.1" value="1">
+
+    <label>Volume: <span id="volumeVal" class="val-label">1.0x</span></label>
+    <input type="range" id="volume" min="0" max="1" step="0.1" value="1">
+
+    <div class="button-group">
+      <button id="testSettings" class="test-btn">Test Settings</button>
+      <button id="resetSettings" class="reset-btn">Reset to Default</button>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,122 @@
+body {
+  width: 280px;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  padding: 15px;
+  background-color: #f9f9f9;
+}
+
+h3 { margin: 0 0 15px 0; color: #333; text-align: center; }
+
+.controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 15px;
+}
+
+button {
+  cursor: pointer;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: white;
+  transition: 0.2s;
+  font-size: 0.85em;
+}
+
+button:hover { background: #eee; }
+
+.primary-btn {
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  font-weight: bold;
+}
+
+.primary-btn:hover { background-color: #45a049; }
+
+.test-btn {
+  margin-top: 10px;
+  background-color: #2196F3;
+  color: white;
+  border: none;
+  padding: 10px;
+}
+
+.test-btn:hover { background-color: #1e88e5; }
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+label {
+  font-size: 0.8em;
+  font-weight: bold;
+  color: #555;
+}
+
+select, input[type="range"] {
+  width: 100%;
+}
+
+hr { border: 0; border-top: 1px solid #ddd; margin: 15px 0; }
+
+/* ... existing styles ... */
+
+.button-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.reset-btn {
+  background-color: #f44336; /* Red color */
+  color: white;
+  border: none;
+  padding: 8px;
+}
+
+.reset-btn:hover {
+  background-color: #d32f2f;
+}
+
+.test-btn {
+  background-color: #2196F3;
+  color: white;
+  border: none;
+  padding: 10px;
+}
+
+/* ... existing styles ... */
+
+.val-label {
+  float: right;
+  font-family: monospace;
+  color: #888;
+  background: #eee;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.85em;
+  transition: 0.3s;
+}
+
+/* Style for when a setting is different from 1.0x */
+.val-label.changed {
+  color: white;
+  background: #f39c12; /* Orange warning color */
+  font-weight: bold;
+}
+
+label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.85em;
+  font-weight: bold;
+  color: #444;
+}
+
+input[type="range"] {
+  margin-bottom: 12px;
+}
