@@ -33,8 +33,8 @@ let creating; // A global promise to avoid concurrency issues
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
-    // Ensure offscreen document exists when we need to play
-    if (msg.type === 'CMD_PLAY' || msg.type === 'CMD_INIT') {
+    // Ensure offscreen document exists when we need to play or test
+    if (msg.type === 'CMD_PLAY' || msg.type === 'CMD_INIT' || msg.type === 'CMD_TEST') {
         await setupOffscreenDocument(OFFSCREEN_DOCUMENT_PATH);
     }
 });

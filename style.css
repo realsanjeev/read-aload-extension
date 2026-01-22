@@ -12,6 +12,10 @@
   /* Soft yellow for highlighting */
 }
 
+* {
+  box-sizing: border-box;
+}
+
 body {
   width: 360px;
   height: 500px;

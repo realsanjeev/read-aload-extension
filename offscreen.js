@@ -42,30 +42,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         case 'CMD_UPDATE_SETTINGS':
             updateSettings(msg.settings);
             break;
+        case 'CMD_TEST':
+            testVoice();
+            break;
         case 'CMD_GET_STATE':
-            // Send current state back to popup (useful when reopening popup)
             sendUpdate();
             break;
     }
 });
 
 function initPlayer(text, startIndex) {
-    // Basic sentence splitting (same logic as before)
     const sentenceRegex = /[^.!?]+[.!?]+["']?|[^.!?]+$/g;
     const rawSentences = text.match(sentenceRegex) || [text];
     playerState.sentences = rawSentences.map(s => s.trim()).filter(s => s.length > 0);
-
     playerState.currentIndex = startIndex;
-    stop(); // Reset checks
-
-    // Auto-play on init
+    stop();
     play();
 }
 
 function updateSettings(newSettings) {
     playerState.settings = { ...playerState.settings, ...newSettings };
-    // If playing, restart current sentence to apply settings immediately? 
-    // Or just apply to next. Let's restart for better UX.
     if (playerState.isPlaying && !playerState.isPaused) {
         window.speechSynthesis.cancel();
         speakCurrentSentence();
@@ -74,11 +70,8 @@ function updateSettings(newSettings) {
 
 function play() {
     if (playerState.sentences.length === 0) return;
-
     playerState.isPlaying = true;
     playerState.isPaused = false;
-
-    // Resume or Start
     if (window.speechSynthesis.paused) {
         window.speechSynthesis.resume();
     } else {
@@ -90,9 +83,6 @@ function play() {
 function pause() {
     playerState.isPlaying = false;
     playerState.isPaused = true;
-    window.speechSynthesis.pause(); // Standard pause is better for "resume"
-    // However, for granular control (prev/next), cancel is safer. 
-    // We'll stick to cancel() logic for robustness in this phase
     window.speechSynthesis.cancel();
     sendUpdate();
 }
@@ -133,7 +123,6 @@ function jump(index) {
 
 function speakCurrentSentence() {
     window.speechSynthesis.cancel();
-
     if (playerState.currentIndex >= playerState.sentences.length) {
         playerState.isPlaying = false;
         sendUpdate();
@@ -153,9 +142,7 @@ function speakCurrentSentence() {
         if (v) utter.voice = v;
     }
 
-    utter.onstart = () => {
-        sendUpdate();
-    };
+    utter.onstart = () => sendUpdate();
 
     utter.onend = () => {
         if (playerState.isPlaying && !playerState.isPaused) {
@@ -170,7 +157,6 @@ function speakCurrentSentence() {
 
     utter.onerror = (e) => {
         if (e.error !== 'interrupted' && e.error !== 'canceled') {
-            // Auto-skip
             if (playerState.isPlaying) {
                 playerState.currentIndex++;
                 speakCurrentSentence();
@@ -182,7 +168,6 @@ function speakCurrentSentence() {
 }
 
 function sendUpdate() {
-    // Broadcast state to any open popup
     chrome.runtime.sendMessage({
         type: 'UPDATE_UI',
         state: {
@@ -192,4 +177,23 @@ function sendUpdate() {
             totalSentences: playerState.sentences.length
         }
     });
+}
+
+function testVoice() {
+    window.speechSynthesis.cancel();
+    // Test logic: speak sample, don't mess with playback state
+    const text = "Hi! You are currently testing the settings in the Read Aloud extension. Thank you for using our service. If you like it, please consider giving us a 5-star rating.";
+    const utter = new SpeechSynthesisUtterance(text);
+
+    utter.rate = playerState.settings.rate;
+    utter.pitch = playerState.settings.pitch;
+    utter.volume = playerState.settings.volume;
+
+    const voices = window.speechSynthesis.getVoices();
+    if (playerState.settings.voiceName) {
+        const v = voices.find(voice => voice.name === playerState.settings.voiceName);
+        if (v) utter.voice = v;
+    }
+
+    window.speechSynthesis.speak(utter);
 }

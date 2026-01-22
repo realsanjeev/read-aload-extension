@@ -10,6 +10,7 @@ const btnNext = document.getElementById('btnNext');
 const btnSettings = document.getElementById('btnSettings');
 const btnCloseSettings = document.getElementById('btnCloseSettings');
 const btnReset = document.getElementById('btnReset');
+const btnTestVoice = document.getElementById('btnTestVoice');
 
 const textContent = document.getElementById('textArea');
 const progressBar = document.getElementById('progressBar');
@@ -285,6 +286,12 @@ voiceSelect.onchange = (e) => {
   uiState.settings.voiceName = e.target.value;
   saveAndBroadcastSettings();
 };
+
+if (btnTestVoice) {
+  btnTestVoice.onclick = () => {
+    sendCommand('CMD_TEST');
+  };
+}
 
 btnReset.onclick = () => {
   uiState.settings = { voiceName: null, rate: 1.0, pitch: 1.0, volume: 1.0 };
