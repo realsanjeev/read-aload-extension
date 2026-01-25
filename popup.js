@@ -167,27 +167,97 @@ function extractContentFromPage() {
   const selection = window.getSelection().toString().trim();
   if (selection.length > 0) return selection;
 
-  const selectors = ['article', 'main', '[role="main"]', '.post-content', '#content'];
-  let contentNode = null;
-  for (const selector of selectors) {
+  // 1. Identify "Noise" elements to skip
+  const noiseSelectors = [
+    'nav', 'header', 'footer', 'aside', 'script', 'style', 'iframe',
+    'noscript', '.ads', '#ads', '.sidebar', '.menu', '.social-share',
+    '[role="complementary"]', '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]'
+  ];
+
+  // Specific "Safe" selectors that might trigger noise filters but are known content containers
+  const safeSelectors = ['.txtnav', '#txtnav', '.article-content', '.txt_content'];
+
+  const contentTags = ['article', 'main', '[role="main"]', '.post-content', '.article-body', '#content', '#main', '.txtnav', '.txt_content'];
+  let candidate = null;
+
+  // Check common content containers first
+  for (const selector of contentTags) {
     const node = document.querySelector(selector);
-    if (node && node.innerText.length > 200) {
-      contentNode = node;
+    if (node && node.innerText.trim().length > 400) {
+      candidate = node;
       break;
     }
   }
-  if (!contentNode) contentNode = document.body;
-  if (!contentNode) return "";
 
-  const blockElements = contentNode.querySelectorAll('p, h1, h2, h3, h4, h5, li');
-  if (blockElements.length > 0) {
-    return Array.from(blockElements)
-      .map(el => el.innerText.trim())
-      .filter(t => t.length > 20)
-      .join("\n\n");
-  } else {
-    return contentNode.innerText;
+  // 3. Fallback: Scoring algorithm (simplified Readability-like)
+  if (!candidate) {
+    let topScore = 0;
+    const allDivs = document.querySelectorAll('div, section, article');
+
+    allDivs.forEach(node => {
+      // Skip noise unless it's a known safe selector
+      const isSafe = safeSelectors.some(sel => node.matches(sel));
+      if (!isSafe && noiseSelectors.some(sel => node.matches(sel) || node.closest(sel))) return;
+
+      // Score based on text content length and paragraph density
+      const text = node.innerText.trim();
+      const paragraphs = node.querySelectorAll('p');
+      let score = text.length / 10;
+      score += paragraphs.length * 20;
+
+      // Penalize link density (links usually mean navigation)
+      const links = node.querySelectorAll('a');
+      if (links.length > 0) {
+        const linkTextLength = Array.from(links).reduce((acc, a) => acc + a.innerText.length, 0);
+        const linkDensity = linkTextLength / (text.length || 1);
+        if (linkDensity > 0.4) score *= 0.2;
+      }
+
+      if (score > topScore) {
+        topScore = score;
+        candidate = node;
+      }
+    });
   }
+
+  if (!candidate) candidate = document.body;
+
+  // 4. Extract text from the winning candidate, cleaning as we go
+  // Handle case where content is raw text nodes + <br> instead of <p> (common on 69shuba)
+  const blockElements = candidate.querySelectorAll('p, h1, h2, h3, h4, h5, li');
+  let extractedLines = [];
+
+  // If there are many blocks, use them (high confidence in blocks)
+  if (blockElements.length > 5) {
+    blockElements.forEach(el => {
+      // Check if visible and not in noise
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden') return;
+      if (noiseSelectors.some(sel => el.closest(sel))) return;
+
+      const text = el.innerText.trim();
+      if (text.length > 15) {
+        extractedLines.push(text);
+      }
+    });
+  } else {
+    // Fallback for raw text/BR sites: use innerText but filter child noise
+    // We clone the node to remove unwanted sub-elements before getting text
+    const clone = candidate.cloneNode(true);
+    const noiseInClone = clone.querySelectorAll(noiseSelectors.join(','));
+    noiseInClone.forEach(n => n.remove());
+
+    // Also remove secondary titles or tools nested inside common in reading sites
+    const subNoise = clone.querySelectorAll('.tools, .baocuo, .contentadv, .bottom-ad, .site-info, .mytitle');
+    subNoise.forEach(t => t.remove());
+
+    return clone.innerText.split('\n')
+      .map(t => t.trim())
+      .filter(t => t.length > 20)
+      .join('\n\n');
+  }
+
+  return extractedLines.join('\n\n');
 }
 
 // --- Settings Logic ---
