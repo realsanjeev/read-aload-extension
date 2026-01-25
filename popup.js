@@ -167,10 +167,13 @@ function extractContentFromPage() {
   const selection = window.getSelection().toString().trim();
   if (selection.length > 0) return selection;
 
-  // 1. Identify "Noise" elements to skip
+  // 1. Identify "Noise" elements to skip - Expanded for better ad filtering
   const noiseSelectors = [
-    'nav', 'header', 'footer', 'aside', 'script', 'style', 'iframe',
+    'nav', 'header', 'footer', 'aside', 'script', 'style', 'iframe', 'ins',
     'noscript', '.ads', '#ads', '.sidebar', '.menu', '.social-share',
+    '.ad-container', '.ad-slot', '.sponsored', '.promo', '.banner-ad',
+    '[class*="ad-"]', '[id*="ad-"]', '[class*="sponsored"]', '[class*="promo"]',
+    '[id*="goog"]', '.google-ad', '.amazon-ad', '.outbrain', '.taboola',
     '[role="complementary"]', '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]'
   ];
 
@@ -223,7 +226,7 @@ function extractContentFromPage() {
   if (!candidate) candidate = document.body;
 
   // 4. Extract text from the winning candidate, cleaning as we go
-  // Handle case where content is raw text nodes + <br> instead of <p> (common on 69shuba)
+  // Handle case where content is raw text nodes + <br> instead of <p>
   const blockElements = candidate.querySelectorAll('p, h1, h2, h3, h4, h5, li');
   let extractedLines = [];
 
@@ -233,7 +236,9 @@ function extractContentFromPage() {
       // Check if visible and not in noise
       const style = window.getComputedStyle(el);
       if (style.display === 'none' || style.visibility === 'hidden') return;
-      if (noiseSelectors.some(sel => el.closest(sel))) return;
+
+      // Secondary check: if it matches noise selectors itself
+      if (noiseSelectors.some(sel => el.matches(sel) || el.closest(sel))) return;
 
       const text = el.innerText.trim();
       if (text.length > 15) {
@@ -242,14 +247,21 @@ function extractContentFromPage() {
     });
   } else {
     // Fallback for raw text/BR sites: use innerText but filter child noise
-    // We clone the node to remove unwanted sub-elements before getting text
     const clone = candidate.cloneNode(true);
-    const noiseInClone = clone.querySelectorAll(noiseSelectors.join(','));
+
+    // Aggressive cleaning of the clone
+    const allSelectors = [...noiseSelectors, '.tools', '.baocuo', '.contentadv', '.bottom-ad', '.site-info', '.mytitle', '.hint'];
+    const noiseInClone = clone.querySelectorAll(allSelectors.join(','));
     noiseInClone.forEach(n => n.remove());
 
-    // Also remove secondary titles or tools nested inside common in reading sites
-    const subNoise = clone.querySelectorAll('.tools, .baocuo, .contentadv, .bottom-ad, .site-info, .mytitle');
-    subNoise.forEach(t => t.remove());
+    // Also remove elements with likely ad-related strings in their class/ID
+    const allInClone = clone.querySelectorAll('*');
+    allInClone.forEach(el => {
+      const cls = el.className;
+      const id = el.id;
+      if (typeof cls === 'string' && (cls.toLowerCase().includes('ad-') || cls.toLowerCase().includes('google'))) el.remove();
+      else if (typeof id === 'string' && (id.toLowerCase().includes('ad-') || id.toLowerCase().includes('google'))) el.remove();
+    });
 
     return clone.innerText.split('\n')
       .map(t => t.trim())
