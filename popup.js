@@ -11,6 +11,7 @@ const btnSettings = document.getElementById('btnSettings');
 const btnCloseSettings = document.getElementById('btnCloseSettings');
 const btnReset = document.getElementById('btnReset');
 const btnTestVoice = document.getElementById('btnTestVoice');
+const linkReportIssue = document.getElementById('linkReportIssue');
 
 const textContent = document.getElementById('textArea');
 const progressBar = document.getElementById('progressBar');
@@ -302,3 +303,10 @@ btnReset.onclick = () => {
   populateVoices();
   saveAndBroadcastSettings();
 };
+
+if (linkReportIssue) {
+  linkReportIssue.onclick = (e) => {
+    e.preventDefault();
+    chrome.tabs.create({ url: linkReportIssue.href });
+  };
+}

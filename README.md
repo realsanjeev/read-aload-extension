@@ -40,3 +40,6 @@ A premium Text-to-Speech (TTS) Chrome Extension that automatically detects and r
 
 ### References:
 - Icon based on: [Flaticon Megaphone](https://www.flaticon.com/free-icon/megaphone_9018879)
+- [Chrome Extension Manifest - Developer Docs](https://developer.chrome.com/docs/extensions/reference/manifest)
+- [Chrome Extension Permission - Developer Docs](https://developer.chrome.com/docs/extensions/reference/permissions-list)
+- [Offscreen API](https://developer.chrome.com/docs/extensions/reference/api/offscreen)
