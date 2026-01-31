@@ -24,8 +24,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         case 'CMD_PLAY':
             play();
             break;
+        case 'CMD_TOGGLE_PLAY':
+            togglePlay();
+            break;
         case 'CMD_PAUSE':
-            pause();
+            togglePause();
             break;
         case 'CMD_STOP':
             stop();
@@ -85,6 +88,22 @@ function pause() {
     playerState.isPaused = true;
     window.speechSynthesis.cancel();
     sendUpdate();
+}
+
+function togglePlay() {
+    if (playerState.isPlaying) {
+        stop();
+    } else {
+        play();
+    }
+}
+
+function togglePause() {
+    if (playerState.isPlaying) {
+        pause();
+    } else {
+        play();
+    }
 }
 
 function stop() {
