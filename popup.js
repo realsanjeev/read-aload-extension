@@ -58,6 +58,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     const rawText = await getPageContent();
     initializeUI(rawText);
 
+    // Auto-detect language and select voice if not set
+    if (!uiState.settings.voiceName && rawText && rawText.length > 20) {
+      chrome.runtime.sendMessage({ type: 'CMD_DETECT_LANG', text: rawText.slice(0, 500) }, (response) => {
+        if (response && response.lang) {
+          console.log("Detected Language:", response.lang);
+          const langCode = response.lang.split('-')[0].toLowerCase();
+
+          // Find matching voice
+          const matchingVoice = voices.find(v => v.lang.toLowerCase().startsWith(langCode));
+          if (matchingVoice) {
+            uiState.settings.voiceName = matchingVoice.name;
+            voiceSelect.value = matchingVoice.name;
+            // Save it? Maybe better to keep it ephemeral unless user changes it.
+            // But for now let's set it in UI state so it plays with this voice.
+            updateSettings({ voiceName: matchingVoice.name });
+          }
+        }
+      });
+    }
+
     // Check if background player is already running
     chrome.runtime.sendMessage({ type: 'CMD_GET_STATE' });
   } catch (err) {
@@ -189,7 +209,14 @@ function extractContentFromPage() {
   // --- Read-Aloud Inspired Text Extraction ---
   // Based on https://github.com/ken107/read-aloud/blob/master/js/content/html-doc.js
 
-  // 1. Check for user selection first
+  // 1. Check if current page is PDF
+  if (document.contentType === 'application/pdf' || document.location.pathname.endsWith('.pdf')) {
+    const viewerUrl = chrome.runtime.getURL('pdf-viewer.html') + '?url=' + encodeURIComponent(document.location.href);
+    document.location.href = viewerUrl;
+    return 'Redirecting to PDF Viewer...';
+  }
+
+  // 2. Check for user selection first
   const selection = window.getSelection().toString().trim();
   if (selection.length > 0) return selection;
 
