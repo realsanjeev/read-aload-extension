@@ -90,10 +90,26 @@ function initializeUI(text) {
     return;
   }
 
-  // Parse sentences locally for rendering
-  const sentenceRegex = /[^.!?]+[.!?]+["']?|[^.!?]+$/g;
-  uiState.sentences = text.match(sentenceRegex) || [text];
-  uiState.sentences = uiState.sentences.map(s => s.trim()).filter(s => s.length > 0);
+  // Parse sentences locally for rendering - Updated to respect newlines as boundaries
+  // This prevents merged lines in novels/translated content
+  const lines = text.split(/\n+/);
+  uiState.sentences = [];
+  uiState.lineBreaks = []; // Track indices where line breaks should appear
+
+  lines.forEach(line => {
+    const trimmedLine = line.trim();
+    if (trimmedLine.length === 0) return;
+
+    // Mark where this new line starts in the sentence array
+    if (uiState.sentences.length > 0) {
+      uiState.lineBreaks.push(uiState.sentences.length);
+    }
+
+    // Split each line into sentences but keep them within the same paragraph context
+    const sentenceRegex = /[^.!?]+[.!?]+["']?|[^.!?]+$/g;
+    const lineSentences = trimmedLine.match(sentenceRegex) || [trimmedLine];
+    uiState.sentences.push(...lineSentences.map(s => s.trim()).filter(s => s.length > 0));
+  });
 
   renderSentences();
   updateProgress();
@@ -102,6 +118,12 @@ function initializeUI(text) {
 function renderSentences() {
   textContent.innerHTML = "";
   uiState.sentences.forEach((sentence, index) => {
+    // Add visual line break before this sentence if it starts a new paragraph
+    if (uiState.lineBreaks && uiState.lineBreaks.includes(index)) {
+      textContent.appendChild(document.createElement('br'));
+      textContent.appendChild(document.createElement('br'));
+    }
+
     const span = document.createElement('span');
     span.textContent = sentence + " ";
     span.id = `sentence-${index}`;
@@ -241,7 +263,7 @@ function extractContentFromPage() {
       if (noiseSelectors.some(sel => el.matches(sel) || el.closest(sel))) return;
 
       const text = el.innerText.trim();
-      if (text.length > 15) {
+      if (text.length >= 3) { // Refined threshold to skip tiny noise while keeping dialogue
         extractedLines.push(text);
       }
     });
@@ -250,7 +272,7 @@ function extractContentFromPage() {
     const clone = candidate.cloneNode(true);
 
     // Aggressive cleaning of the clone
-    const allSelectors = [...noiseSelectors, '.tools', '.baocuo', '.contentadv', '.bottom-ad', '.site-info', '.mytitle', '.hint'];
+    const allSelectors = [...noiseSelectors, '.tools', '.baocuo', '.contentadv', '.bottom-ad', '.site-info', '.mytitle', '.hint', '.author-info', '.post-time'];
     const noiseInClone = clone.querySelectorAll(allSelectors.join(','));
     noiseInClone.forEach(n => n.remove());
 
@@ -263,14 +285,16 @@ function extractContentFromPage() {
       else if (typeof id === 'string' && (id.toLowerCase().includes('ad-') || id.toLowerCase().includes('google'))) el.remove();
     });
 
-    return clone.innerText.split('\n')
-      .map(t => t.trim())
-      .filter(t => t.length > 20)
+    // Improved split to better handle translated/complex page structures
+    // Use /[ \t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/ to catch unicode spaces like EM SPACE
+    return clone.innerText.split(/\n\r?|\r/)
+      .map(t => t.replace(/[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g, ' ').trim())
+      .filter(t => t.length >= 3) // Refined threshold
       .join('\n\n');
   }
 
   return extractedLines.join('\n\n');
-}
+} z
 
 // --- Settings Logic ---
 async function loadSettings() {
