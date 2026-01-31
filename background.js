@@ -38,3 +38,23 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
         await setupOffscreenDocument(OFFSCREEN_DOCUMENT_PATH);
     }
 });
+// Listen for keyboard commands
+chrome.commands.onCommand.addListener(async (command) => {
+    // Ensure offscreen document exists before sending commands
+    await setupOffscreenDocument(OFFSCREEN_DOCUMENT_PATH);
+
+    switch (command) {
+        case 'play_stop':
+            chrome.runtime.sendMessage({ type: 'CMD_TOGGLE_PLAY' });
+            break;
+        case 'pause_resume':
+            chrome.runtime.sendMessage({ type: 'CMD_PAUSE' });
+            break;
+        case 'forward':
+            chrome.runtime.sendMessage({ type: 'CMD_NEXT' });
+            break;
+        case 'rewind':
+            chrome.runtime.sendMessage({ type: 'CMD_PREV' });
+            break;
+    }
+});
