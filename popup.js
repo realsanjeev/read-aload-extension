@@ -186,115 +186,356 @@ async function getPageContent() {
 }
 
 function extractContentFromPage() {
+  // --- Read-Aloud Inspired Text Extraction ---
+  // Based on https://github.com/ken107/read-aloud/blob/master/js/content/html-doc.js
+
+  // 1. Check for user selection first
   const selection = window.getSelection().toString().trim();
   if (selection.length > 0) return selection;
 
-  // 1. Identify "Noise" elements to skip - Expanded for better ad filtering
-  const noiseSelectors = [
-    'nav', 'header', 'footer', 'aside', 'script', 'style', 'iframe', 'ins',
-    'noscript', '.ads', '#ads', '.sidebar', '.menu', '.social-share',
-    '.ad-container', '.ad-slot', '.sponsored', '.promo', '.banner-ad',
-    '[class*="ad-"]', '[id*="ad-"]', '[class*="sponsored"]', '[class*="promo"]',
-    '[id*="goog"]', '.google-ad', '.amazon-ad', '.outbrain', '.taboola',
-    '[role="complementary"]', '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]'
-  ];
+  // 2. Define tags to ignore (noise elements)
+  const ignoreTags = 'select, textarea, button, label, audio, video, dialog, embed, menu, nav, noframes, noscript, object, script, style, svg, aside, footer, #footer, .no-read-aloud, [aria-hidden="true"], .ads, .ad-container, .sidebar, .social-share, [class*="ad-"], [id*="ad-"], .btn, .term-edit-btn, .ai-model-badge';
 
-  // Specific "Safe" selectors that might trigger noise filters but are known content containers
-  const safeSelectors = ['.txtnav', '#txtnav', '.article-content', '.txt_content'];
+  // 3. Helper functions
+  function getInnerText(elem) {
+    const text = elem.innerText;
+    return text ? text.trim() : '';
+  }
 
-  const contentTags = ['article', 'main', '[role="main"]', '.post-content', '.article-body', '#content', '#main', '.txtnav', '.txt_content'];
-  let candidate = null;
+  function isVisible(elem) {
+    if (!elem.offsetWidth && !elem.offsetHeight) return false;
+    const style = window.getComputedStyle(elem);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+  }
 
-  // Check common content containers first
-  for (const selector of contentTags) {
-    const node = document.querySelector(selector);
-    if (node && node.innerText.trim().length > 400) {
-      candidate = node;
-      break;
+  function shouldSkip(elem) {
+    if (!isVisible(elem)) return true;
+    try {
+      if (elem.matches(ignoreTags)) return true;
+    } catch (e) { /* invalid selector */ }
+    const style = window.getComputedStyle(elem);
+    if (style.float === 'right' || style.position === 'fixed') return true;
+    return false;
+  }
+
+  function someChildNodes(elem, test) {
+    let child = elem.firstChild;
+    while (child) {
+      if (test(child)) return true;
+      child = child.nextSibling;
+    }
+    return false;
+  }
+
+  function isTextNode(node) {
+    return node.nodeType === 3 && node.nodeValue.trim().length >= 3;
+  }
+
+  function isParagraph(node, threshold) {
+    return node.nodeType === 1 &&
+      node.tagName === 'P' &&
+      isVisible(node) &&
+      getInnerText(node).length >= threshold;
+  }
+
+  function hasTextNodes(elem, threshold) {
+    return someChildNodes(elem, isTextNode) && getInnerText(elem).length >= threshold;
+  }
+
+  function hasParagraphs(elem, threshold) {
+    return someChildNodes(elem, node => isParagraph(node, threshold));
+  }
+
+  // 4. Find text blocks via recursive DOM walk
+  function findTextBlocks(threshold) {
+    const skipTagsSelector = 'h1, h2, h3, h4, h5, h6, p, a[href], ' + ignoreTags;
+    const textBlocks = [];
+
+    function containsTextBlocks(elem) {
+      const children = Array.from(elem.children).filter(c => {
+        try { return !c.matches(skipTagsSelector); } catch (e) { return true; }
+      });
+      return children.some(c => hasTextNodes(c, threshold)) ||
+        children.some(c => hasParagraphs(c, threshold)) ||
+        children.some(containsTextBlocks);
+    }
+
+    function addBlock(elem, isMulti) {
+      if (isMulti) elem.dataset.readAloudMultiBlock = 'true';
+      textBlocks.push(elem);
+    }
+
+    function walk(elem) {
+      if (!elem || !elem.tagName) return;
+
+      try {
+        // Handle iframes
+        if (elem.tagName === 'IFRAME' || elem.tagName === 'FRAME') {
+          try { walk(elem.contentDocument.body); } catch (e) { /* cross-origin */ }
+          return;
+        }
+
+        // Handle definition lists
+        if (elem.tagName === 'DL') {
+          addBlock(elem);
+          return;
+        }
+
+        // Handle ordered/unordered lists
+        if (elem.tagName === 'OL' || elem.tagName === 'UL') {
+          const items = Array.from(elem.children);
+          if (items.some(li => hasTextNodes(li, threshold))) {
+            addBlock(elem);
+          } else if (items.some(li => hasParagraphs(li, threshold))) {
+            addBlock(elem, true);
+          } else if (items.some(containsTextBlocks)) {
+            addBlock(elem, true);
+          }
+          return;
+        }
+
+        // Handle tables
+        if (elem.tagName === 'TBODY') {
+          const rows = Array.from(elem.children);
+          if (rows.length > 3 || (rows[0] && rows[0].children.length > 3)) {
+            if (rows.some(containsTextBlocks)) addBlock(elem, true);
+          } else {
+            rows.forEach(walk);
+          }
+          return;
+        }
+
+        // General case
+        if (hasTextNodes(elem, threshold)) {
+          addBlock(elem);
+        } else if (hasParagraphs(elem, threshold)) {
+          addBlock(elem, true);
+        } else {
+          // Check shadow DOM too
+          const children = elem.shadowRoot
+            ? [...elem.children, ...elem.shadowRoot.children]
+            : elem.children;
+          Array.from(children).forEach(child => {
+            try {
+              if (!child.matches(skipTagsSelector)) walk(child);
+            } catch (e) {
+              walk(child);
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('Walk error:', e);
+      }
+    }
+
+    walk(document.body);
+
+    // Filter to only visible blocks with positive offset
+    return textBlocks.filter(elem => {
+      if (!isVisible(elem)) return false;
+      try {
+        const rect = elem.getBoundingClientRect();
+        return rect.left >= 0;
+      } catch (e) {
+        return true;
+      }
+    });
+  }
+
+  // 5. Calculate Gaussian distribution for statistical outlier detection
+  function getGaussian(texts, start = 0, end = texts.length) {
+    let sum = 0;
+    for (let i = start; i < end; i++) sum += texts[i].length;
+    const mean = sum / (end - start);
+    let variance = 0;
+    for (let i = start; i < end; i++) {
+      variance += (texts[i].length - mean) * (texts[i].length - mean);
+    }
+    return { mean, stdev: Math.sqrt(variance / (end - start || 1)) };
+  }
+
+  // 6. Determine if an element should not be read (noise within content)
+  function dontRead(elem) {
+    const style = window.getComputedStyle(elem);
+    const float = style.float;
+    const position = style.position;
+    try {
+      return elem.matches(ignoreTags) ||
+        elem.tagName === 'SUP' ||
+        float === 'right' ||
+        position === 'fixed';
+    } catch (e) {
+      return false;
     }
   }
 
-  // 3. Fallback: Scoring algorithm (simplified Readability-like)
-  if (!candidate) {
-    let topScore = 0;
-    const allDivs = document.querySelectorAll('div, section, article');
+  // 7. Add numbering to list items that don't already have it
+  function addNumbering(listElem) {
+    const children = Array.from(listElem.children);
+    if (children.length === 0) return;
 
-    allDivs.forEach(node => {
-      // Skip noise unless it's a known safe selector
-      const isSafe = safeSelectors.some(sel => node.matches(sel));
-      if (!isSafe && noiseSelectors.some(sel => node.matches(sel) || node.closest(sel))) return;
+    const firstText = children[0].innerText ? children[0].innerText.trim() : '';
+    // Don't add numbering if items already have numbering
+    if (firstText && /^[(]?(\d|[a-zA-Z][).])/.test(firstText)) return;
 
-      // Score based on text content length and paragraph density
-      const text = node.innerText.trim();
-      const paragraphs = node.querySelectorAll('p');
-      let score = text.length / 10;
-      score += paragraphs.length * 20;
-
-      // Penalize link density (links usually mean navigation)
-      const links = node.querySelectorAll('a');
-      if (links.length > 0) {
-        const linkTextLength = Array.from(links).reduce((acc, a) => acc + a.innerText.length, 0);
-        const linkDensity = linkTextLength / (text.length || 1);
-        if (linkDensity > 0.4) score *= 0.2;
-      }
-
-      if (score > topScore) {
-        topScore = score;
-        candidate = node;
-      }
+    children.forEach((child, index) => {
+      const span = document.createElement('span');
+      span.className = 'read-aloud-numbering';
+      span.textContent = (index + 1) + '. ';
+      child.insertBefore(span, child.firstChild);
     });
   }
 
-  if (!candidate) candidate = document.body;
-
-  // 4. Extract text from the winning candidate, cleaning as we go
-  // Handle case where content is raw text nodes + <br> instead of <p>
-  const blockElements = candidate.querySelectorAll('p, h1, h2, h3, h4, h5, li');
-  let extractedLines = [];
-
-  // If there are many blocks, use them (high confidence in blocks)
-  if (blockElements.length > 5) {
-    blockElements.forEach(el => {
-      // Check if visible and not in noise
-      const style = window.getComputedStyle(el);
-      if (style.display === 'none' || style.visibility === 'hidden') return;
-
-      // Secondary check: if it matches noise selectors itself
-      if (noiseSelectors.some(sel => el.matches(sel) || el.closest(sel))) return;
-
-      const text = el.innerText.trim();
-      if (text.length >= 3) { // Refined threshold to skip tiny noise while keeping dialogue
-        extractedLines.push(text);
+  // 8. Extract text from a block - with hiding of noise elements
+  function getTexts(elem) {
+    // Find and hide elements that shouldn't be read
+    const toHide = [];
+    elem.querySelectorAll('*').forEach(child => {
+      if (isVisible(child) && dontRead(child)) {
+        child.style.display = 'none';
+        toHide.push(child);
       }
     });
-  } else {
-    // Fallback for raw text/BR sites: use innerText but filter child noise
-    const clone = candidate.cloneNode(true);
 
-    // Aggressive cleaning of the clone
-    const allSelectors = [...noiseSelectors, '.tools', '.baocuo', '.contentadv', '.bottom-ad', '.site-info', '.mytitle', '.hint', '.author-info', '.post-time'];
-    const noiseInClone = clone.querySelectorAll(allSelectors.join(','));
-    noiseInClone.forEach(n => n.remove());
+    // Add numbering to lists
+    elem.querySelectorAll('ol, ul').forEach(addNumbering);
+    if (elem.tagName === 'OL' || elem.tagName === 'UL') {
+      addNumbering(elem);
+    }
 
-    // Also remove elements with likely ad-related strings in their class/ID
-    const allInClone = clone.querySelectorAll('*');
-    allInClone.forEach(el => {
-      const cls = el.className;
-      const id = el.id;
-      if (typeof cls === 'string' && (cls.toLowerCase().includes('ad-') || cls.toLowerCase().includes('google'))) el.remove();
-      else if (typeof id === 'string' && (id.toLowerCase().includes('ad-') || id.toLowerCase().includes('google'))) el.remove();
-    });
+    // Extract text based on block type
+    let texts;
+    if (elem.dataset && elem.dataset.readAloudMultiBlock) {
+      texts = Array.from(elem.children)
+        .filter(isVisible)
+        .map(child => getText(child));
+    } else {
+      texts = getText(elem).split(/(?:\s*\r?\n\s*){2,}/);
+    }
 
-    // Improved split to better handle translated/complex page structures
-    // Use /[ \t\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/ to catch unicode spaces like EM SPACE
-    return clone.innerText.split(/\n\r?|\r/)
-      .map(t => t.replace(/[\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/g, ' ').trim())
-      .filter(t => t.length >= 3) // Refined threshold
-      .join('\n\n');
+    // Clean up: remove numbering spans and unhide elements
+    elem.querySelectorAll('.read-aloud-numbering').forEach(span => span.remove());
+    toHide.forEach(el => { el.style.display = ''; });
+
+    return texts;
   }
 
-  return extractedLines.join('\n\n');
-} z
+  // 9. Extract text from a single element  
+  function getText(elem) {
+    return addMissingPunctuation(elem.innerText).trim();
+  }
+
+  // 10. Add missing punctuation to lines ending with word characters
+  function addMissingPunctuation(text) {
+    return text.replace(/(\w)(\s*?\r?\n)/g, '$1.$2');
+  }
+
+  // 11. Parse the document
+  function parse() {
+    // Find blocks with high threshold first (50 chars)
+    let textBlocks = findTextBlocks(50);
+    let countChars = textBlocks.reduce((sum, elem) => sum + getInnerText(elem).length, 0);
+    console.log('[SpeakAloud] Found', textBlocks.length, 'blocks,', countChars, 'chars (threshold=50)');
+
+    // If not enough content, try lower threshold
+    if (countChars < 1000) {
+      textBlocks = findTextBlocks(3);
+      const texts = textBlocks.map(getInnerText);
+      console.log('[SpeakAloud] Using lower threshold, found', textBlocks.length, 'blocks,', texts.join('').length, 'chars');
+
+      // Trim header and footer using Gaussian outlier detection
+      if (texts.length > 6) {
+        let head = null, tail = null;
+
+        // Find header cutoff
+        for (let i = 3; i < texts.length && head === null; i++) {
+          const dist = getGaussian(texts, 0, i);
+          if (texts[i].length > dist.mean + 2 * dist.stdev) head = i;
+        }
+
+        // Find footer cutoff
+        for (let i = texts.length - 4; i >= 0 && tail === null; i--) {
+          const dist = getGaussian(texts, i + 1, texts.length);
+          if (texts[i].length > dist.mean + 2 * dist.stdev) tail = i + 1;
+        }
+
+        if (head !== null || tail !== null) {
+          textBlocks = textBlocks.slice(head || 0, tail || textBlocks.length);
+          console.log('[SpeakAloud] Trimmed header/footer:', head, tail);
+        }
+      }
+    }
+
+    // Find headings for each block
+    const toRead = [];
+    for (let i = 0; i < textBlocks.length; i++) {
+      toRead.push(...findHeadingsFor(textBlocks[i], textBlocks[i - 1]));
+      toRead.push(textBlocks[i]);
+    }
+
+    // Extract texts from blocks using getTexts (with hiding/numbering)
+    return toRead.flatMap(getTexts).filter(t => t && t.length > 0);
+  }
+
+  // 12. Find headings that precede a content block
+  function findHeadingsFor(block, prevBlock) {
+    const result = [];
+
+    function getHeadingLevel(elem) {
+      if (!elem || !elem.tagName) return 100;
+      const match = /^H(\d)$/i.exec(elem.tagName);
+      return match ? Number(match[1]) : 100;
+    }
+
+    function previousNode(node, skipChildren) {
+      if (!node || node.tagName === 'BODY') return null;
+      if (node.nodeType === 1 && !skipChildren && node.lastChild) return node.lastChild;
+      if (node.previousSibling) return node.previousSibling;
+      if (node.parentNode) return previousNode(node.parentNode, true);
+      return null;
+    }
+
+    // Get level of first heading/paragraph inside the block
+    const firstInner = block.querySelector('h1, h2, h3, h4, h5, h6, p');
+    let currentLevel = getHeadingLevel(firstInner);
+    let node = previousNode(block, true);
+
+    while (node && node !== prevBlock) {
+      try {
+        const shouldIgnore = node.matches && node.matches(ignoreTags);
+        if (!shouldIgnore && node.nodeType === 1 && isVisible(node)) {
+          const level = getHeadingLevel(node);
+          if (level < currentLevel) {
+            result.push(node);
+            currentLevel = level;
+          }
+        }
+        node = previousNode(node, shouldIgnore);
+      } catch (e) {
+        node = previousNode(node, true);
+      }
+    }
+
+    return result.reverse();
+  }
+
+  // 10. Run the extraction
+  try {
+    const texts = parse();
+    if (texts.length === 0) {
+      // Fallback: use document body innerText
+      return addMissingPunctuation(document.body.innerText)
+        .split(/(?:\s*\r?\n\s*){2,}/)
+        .filter(t => t.trim().length >= 3)
+        .join('\n\n');
+    }
+    return texts.join('\n\n');
+  } catch (err) {
+    console.error('[SpeakAloud] Extraction error:', err);
+    // Ultimate fallback
+    return document.body.innerText;
+  }
+}
 
 // --- Settings Logic ---
 async function loadSettings() {
