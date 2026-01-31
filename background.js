@@ -33,9 +33,15 @@ let creating; // A global promise to avoid concurrency issues
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
-    // Ensure offscreen document exists when we need to play or test
-    if (msg.type === 'CMD_PLAY' || msg.type === 'CMD_INIT' || msg.type === 'CMD_TEST') {
+    // Ensure offscreen document exists when we need to play or test or detect lang
+    if (msg.type === 'CMD_PLAY' || msg.type === 'CMD_INIT' || msg.type === 'CMD_TEST' || msg.type === 'CMD_DETECT_LANG') {
         await setupOffscreenDocument(OFFSCREEN_DOCUMENT_PATH);
+    }
+
+    // Proxy detect lang to offscreen
+    if (msg.type === 'CMD_DETECT_LANG') {
+        chrome.runtime.sendMessage(msg, sendResponse);
+        return true; // Wait for async response
     }
 });
 // Listen for keyboard commands

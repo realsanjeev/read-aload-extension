@@ -216,3 +216,77 @@ function testVoice() {
 
     window.speechSynthesis.speak(utter);
 }
+
+// --- FastText Language Detection ---
+
+let fasttextFrame = null;
+let fasttextPending = {};
+
+function getFasttextFrame() {
+    if (!fasttextFrame) {
+        fasttextFrame = document.createElement('iframe');
+        fasttextFrame.src = 'https://ttstool.com/fasttext/index.html';
+        fasttextFrame.style.display = 'none';
+        document.body.appendChild(fasttextFrame);
+
+        window.addEventListener('message', e => {
+            if (e.source === fasttextFrame.contentWindow) {
+                handleFasttextMessage(e.data);
+            }
+        });
+    }
+    return fasttextFrame;
+}
+
+function handleFasttextMessage(msg) {
+    if (msg.type === 'response' && msg.id && fasttextPending[msg.id]) {
+        if (msg.error) fasttextPending[msg.id].reject(new Error(msg.error));
+        else fasttextPending[msg.id].resolve(msg.result);
+        delete fasttextPending[msg.id];
+    }
+}
+
+function detectLanguage(text) {
+    const frame = getFasttextFrame();
+    const id = Math.random().toString(36).substr(2);
+
+    return new Promise((resolve, reject) => {
+        fasttextPending[id] = { resolve, reject };
+
+        const request = {
+            from: "fasttext-host",
+            to: "fasttext-service",
+            type: "request",
+            id: id,
+            method: "detectLanguage",
+            args: [text]
+        };
+
+        if (!frame.contentWindow) {
+            reject(new Error("FastText frame not ready"));
+            return;
+        }
+
+        // Give the iframe a moment to load if just created
+        setTimeout(() => {
+            frame.contentWindow.postMessage(request, '*');
+        }, 500);
+
+        setTimeout(() => {
+            if (fasttextPending[id]) {
+                delete fasttextPending[id];
+                reject(new Error("FastText timeout"));
+            }
+        }, 5000);
+    });
+}
+
+// Handler for CMD_DETECT_LANG
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.type === 'CMD_DETECT_LANG') {
+        detectLanguage(msg.text)
+            .then(lang => sendResponse({ lang }))
+            .catch(err => sendResponse({ error: err.message }));
+        return true;
+    }
+});
