@@ -69,9 +69,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           const matchingVoice = voices.find(v => v.lang.toLowerCase().startsWith(langCode));
           if (matchingVoice) {
             uiState.settings.voiceName = matchingVoice.name;
+            uiState.settings.voiceName = matchingVoice.name;
             voiceSelect.value = matchingVoice.name;
-            // Save it? Maybe better to keep it ephemeral unless user changes it.
-            // But for now let's set it in UI state so it plays with this voice.
+            // Ephemeral update: plays with this voice but doesn't overwrite user default
             updateSettings({ voiceName: matchingVoice.name });
           }
         }
@@ -100,6 +100,12 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 function sendCommand(type, payload = {}) {
   chrome.runtime.sendMessage({ type, ...payload });
+}
+
+// Helper to update local state and notify player, but NOT save to storage (ephemeral)
+function updateSettings(newSettings) {
+  uiState.settings = { ...uiState.settings, ...newSettings };
+  sendCommand('CMD_UPDATE_SETTINGS', { settings: uiState.settings });
 }
 
 // --- Player UI Logic ---
@@ -148,15 +154,8 @@ function renderSentences() {
     span.textContent = sentence + " ";
     span.id = `sentence-${index}`;
     span.dataset.index = index;
-    // Click to Jump
     span.onclick = () => {
-      // Init offscreen player if first time, or just Jump
-      // Ideally we re-init if the text changed, but for now assumption is page static
-      // We always send INIT on click if we want to be safe, but let's assume JUMP is enough if started.
-      // Actually, if fresh popup, offscreen might not have this text.
-      // Safer strategy: always INIT on Play/Jump from a fresh popup context?
-      // Let's rely on INIT being called on Play First.
-      // For jump, we better send INIT first then JUMP.
+      // Always INIT on click to ensure player has correct text/index context
       sendCommand('CMD_INIT', { text: uiState.sentences.join(' '), index: index });
     };
     span.style.cursor = "pointer";

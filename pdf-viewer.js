@@ -78,11 +78,12 @@ function MessageQueue(targetWindow, targetOrigin, handlers) {
         targetWindow.postMessage(message, targetOrigin, transfer);
         return new Promise((resolve, reject) => {
             pending[message.id] = resolve;
-            // Timeout fallback?
+
+            // Timeout after 10 seconds if no response
             setTimeout(() => {
                 if (pending[message.id]) {
                     delete pending[message.id];
-                    reject(new Error("Timeout waiting for response"));
+                    reject(new Error("Timeout: Remote PDF viewer did not respond within 10s"));
                 }
             }, 10000);
         });
