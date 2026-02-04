@@ -69,9 +69,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           const matchingVoice = voices.find(v => v.lang.toLowerCase().startsWith(langCode));
           if (matchingVoice) {
             uiState.settings.voiceName = matchingVoice.name;
+            uiState.settings.voiceName = matchingVoice.name;
             voiceSelect.value = matchingVoice.name;
-            // Save it? Maybe better to keep it ephemeral unless user changes it.
-            // But for now let's set it in UI state so it plays with this voice.
+            // Ephemeral update: plays with this voice but doesn't overwrite user default
             updateSettings({ voiceName: matchingVoice.name });
           }
         }
@@ -100,6 +100,12 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 function sendCommand(type, payload = {}) {
   chrome.runtime.sendMessage({ type, ...payload });
+}
+
+// Helper to update local state and notify player, but NOT save to storage (ephemeral)
+function updateSettings(newSettings) {
+  uiState.settings = { ...uiState.settings, ...newSettings };
+  sendCommand('CMD_UPDATE_SETTINGS', { settings: uiState.settings });
 }
 
 // --- Player UI Logic ---
@@ -148,15 +154,8 @@ function renderSentences() {
     span.textContent = sentence + " ";
     span.id = `sentence-${index}`;
     span.dataset.index = index;
-    // Click to Jump
     span.onclick = () => {
-      // Init offscreen player if first time, or just Jump
-      // Ideally we re-init if the text changed, but for now assumption is page static
-      // We always send INIT on click if we want to be safe, but let's assume JUMP is enough if started.
-      // Actually, if fresh popup, offscreen might not have this text.
-      // Safer strategy: always INIT on Play/Jump from a fresh popup context?
-      // Let's rely on INIT being called on Play First.
-      // For jump, we better send INIT first then JUMP.
+      // Always INIT on click to ensure player has correct text/index context
       sendCommand('CMD_INIT', { text: uiState.sentences.join(' '), index: index });
     };
     span.style.cursor = "pointer";
@@ -197,6 +196,36 @@ async function getPageContent() {
   if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('edge://')) {
     return "Cannot read this internal browser page.";
   }
+
+  const viewerUrlPrefix = chrome.runtime.getURL('pdf-viewer.html');
+
+  // 1. Check if we are already on our custom PDF viewer page
+  if (tab.url.startsWith(viewerUrlPrefix)) {
+    console.log("Already on PDF viewer, requesting texts...");
+    return new Promise((resolve) => {
+      chrome.tabs.sendMessage(tab.id, { type: 'GET_PDF_TEXTS' }, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve("Failed to communicate with PDF viewer: " + chrome.runtime.lastError.message);
+        } else if (response && response.error) {
+          resolve("PDF Viewer Error: " + response.error);
+        } else if (response) {
+          resolve(response.join('\n\n'));
+        } else {
+          resolve("No text found in PDF.");
+        }
+      });
+    });
+  }
+
+  // 2. Check if current page is likely a PDF (cannot inject into Chrome's PDF viewer)
+  if (tab.url.toLowerCase().endsWith('.pdf') || (tab.url.includes('.pdf?') || tab.url.includes('.pdf#'))) {
+    const viewerUrl = viewerUrlPrefix + '?url=' + encodeURIComponent(tab.url);
+    // Use chrome.tabs.create because top-level navigation in the same tab to extension pages
+    // can be blocked by Chrome in Manifest V3 (ERR_BLOCKED_BY_CLIENT).
+    chrome.tabs.create({ url: viewerUrl });
+    return 'Redirecting to PDF Viewer in a new tab...';
+  }
+
   const results = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: extractContentFromPage
@@ -209,14 +238,7 @@ function extractContentFromPage() {
   // --- Read-Aloud Inspired Text Extraction ---
   // Based on https://github.com/ken107/read-aloud/blob/master/js/content/html-doc.js
 
-  // 1. Check if current page is PDF
-  if (document.contentType === 'application/pdf' || document.location.pathname.endsWith('.pdf')) {
-    const viewerUrl = chrome.runtime.getURL('pdf-viewer.html') + '?url=' + encodeURIComponent(document.location.href);
-    document.location.href = viewerUrl;
-    return 'Redirecting to PDF Viewer...';
-  }
-
-  // 2. Check for user selection first
+  // 1. Check for user selection first
   const selection = window.getSelection().toString().trim();
   if (selection.length > 0) return selection;
 
