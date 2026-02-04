@@ -197,6 +197,36 @@ async function getPageContent() {
   if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('edge://')) {
     return "Cannot read this internal browser page.";
   }
+
+  const viewerUrlPrefix = chrome.runtime.getURL('pdf-viewer.html');
+
+  // 1. Check if we are already on our custom PDF viewer page
+  if (tab.url.startsWith(viewerUrlPrefix)) {
+    console.log("Already on PDF viewer, requesting texts...");
+    return new Promise((resolve) => {
+      chrome.tabs.sendMessage(tab.id, { type: 'GET_PDF_TEXTS' }, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve("Failed to communicate with PDF viewer: " + chrome.runtime.lastError.message);
+        } else if (response && response.error) {
+          resolve("PDF Viewer Error: " + response.error);
+        } else if (response) {
+          resolve(response.join('\n\n'));
+        } else {
+          resolve("No text found in PDF.");
+        }
+      });
+    });
+  }
+
+  // 2. Check if current page is likely a PDF (cannot inject into Chrome's PDF viewer)
+  if (tab.url.toLowerCase().endsWith('.pdf') || (tab.url.includes('.pdf?') || tab.url.includes('.pdf#'))) {
+    const viewerUrl = viewerUrlPrefix + '?url=' + encodeURIComponent(tab.url);
+    // Use chrome.tabs.create because top-level navigation in the same tab to extension pages
+    // can be blocked by Chrome in Manifest V3 (ERR_BLOCKED_BY_CLIENT).
+    chrome.tabs.create({ url: viewerUrl });
+    return 'Redirecting to PDF Viewer in a new tab...';
+  }
+
   const results = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: extractContentFromPage
@@ -209,14 +239,7 @@ function extractContentFromPage() {
   // --- Read-Aloud Inspired Text Extraction ---
   // Based on https://github.com/ken107/read-aloud/blob/master/js/content/html-doc.js
 
-  // 1. Check if current page is PDF
-  if (document.contentType === 'application/pdf' || document.location.pathname.endsWith('.pdf')) {
-    const viewerUrl = chrome.runtime.getURL('pdf-viewer.html') + '?url=' + encodeURIComponent(document.location.href);
-    document.location.href = viewerUrl;
-    return 'Redirecting to PDF Viewer...';
-  }
-
-  // 2. Check for user selection first
+  // 1. Check for user selection first
   const selection = window.getSelection().toString().trim();
   if (selection.length > 0) return selection;
 
