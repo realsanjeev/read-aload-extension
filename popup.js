@@ -59,7 +59,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     initializeUI(rawText);
 
     // Auto-detect language and select voice if not set
-    if (!uiState.settings.voiceName && rawText && rawText.length > 20) {
+    if (!uiState.settings.voiceName && rawText && rawText.trim().length > 20) {
       chrome.runtime.sendMessage({ type: 'CMD_DETECT_LANG', text: rawText.slice(0, 500) }, (response) => {
         if (response && response.lang) {
           console.log("Detected Language:", response.lang);
@@ -67,19 +67,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 
           // Find matching voice
           const matchingVoice = voices.find(v => v.lang.toLowerCase().startsWith(langCode));
-          if (matchingVoice) {
-            uiState.settings.voiceName = matchingVoice.name;
+          if (matchingVoice && uiState.settings.voiceName !== matchingVoice.name) {
             uiState.settings.voiceName = matchingVoice.name;
             voiceSelect.value = matchingVoice.name;
-            // Ephemeral update: plays with this voice but doesn't overwrite user default
+            // Update settings in player, but don't force save to storage yet
             updateSettings({ voiceName: matchingVoice.name });
           }
         }
       });
     }
 
-    // Check if background player is already running
-    chrome.runtime.sendMessage({ type: 'CMD_GET_STATE' });
+    // Check if background player is already running (sync UI)
+    chrome.runtime.sendMessage({ type: 'CMD_GET_STATE' }, (response) => {
+      if (response && response.type === 'UPDATE_UI') {
+        handleUpdateUI(response.state);
+      }
+    });
   } catch (err) {
     console.error("Failed to get content:", err);
     textContent.innerHTML = `<p class="error">Could not read page: ${err.message}</p>`;
@@ -90,13 +93,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'UPDATE_UI') {
-    uiState.isPlaying = msg.state.isPlaying;
-    uiState.currentIndex = msg.state.currentIndex;
-    togglePlayIcon(uiState.isPlaying);
-    highlightCurrentSentence();
-    updateProgress();
+    handleUpdateUI(msg.state);
   }
 });
+
+function handleUpdateUI(state) {
+  uiState.isPlaying = state.isPlaying;
+  uiState.currentIndex = state.currentIndex;
+  togglePlayIcon(uiState.isPlaying);
+  highlightCurrentSentence();
+  updateProgress();
+}
 
 function sendCommand(type, payload = {}) {
   chrome.runtime.sendMessage({ type, ...payload });
@@ -156,7 +163,10 @@ function renderSentences() {
     span.dataset.index = index;
     span.onclick = () => {
       // Always INIT on click to ensure player has correct text/index context
-      sendCommand('CMD_INIT', { text: uiState.sentences.join(' '), index: index });
+      sendCommand('CMD_INIT', { 
+        sentences: uiState.sentences, 
+        index: index 
+      });
     };
     span.style.cursor = "pointer";
     textContent.appendChild(span);
@@ -645,7 +655,7 @@ btnPlay.onclick = () => {
   } else {
     // Init with current text to be safe
     sendCommand('CMD_INIT', {
-      text: uiState.sentences.join(' '), // Reconstruct full text 
+      sentences: uiState.sentences, 
       index: uiState.currentIndex
     });
   }

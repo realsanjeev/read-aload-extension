@@ -19,7 +19,7 @@ let playerState = {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     switch (msg.type) {
         case 'CMD_INIT':
-            initPlayer(msg.text, msg.index || 0);
+            initPlayer(msg.text, msg.index || 0, msg.sentences);
             break;
         case 'CMD_PLAY':
             play();
@@ -49,15 +49,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             testVoice();
             break;
         case 'CMD_GET_STATE':
+            const state = {
+                isPlaying: playerState.isPlaying,
+                isPaused: playerState.isPaused,
+                currentIndex: playerState.currentIndex,
+                totalSentences: playerState.sentences.length
+            };
+            if (sendResponse) sendResponse({ type: 'UPDATE_UI', state });
             sendUpdate();
             break;
     }
 });
 
-function initPlayer(text, startIndex) {
-    const sentenceRegex = /[^.!?]+[.!?]+["']?|[^.!?]+$/g;
-    const rawSentences = text.match(sentenceRegex) || [text];
-    playerState.sentences = rawSentences.map(s => s.trim()).filter(s => s.length > 0);
+function initPlayer(text, startIndex, sentences = null) {
+    if (sentences && Array.isArray(sentences)) {
+        playerState.sentences = sentences;
+    } else {
+        const sentenceRegex = /[^.!?]+[.!?]+["']?|[^.!?]+$/g;
+        const rawSentences = text.match(sentenceRegex) || [text];
+        playerState.sentences = rawSentences.map(s => s.trim()).filter(s => s.length > 0);
+    }
     playerState.currentIndex = startIndex;
     stop();
     play();
