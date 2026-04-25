@@ -273,9 +273,13 @@ async function loadSettings() {
   }
 }
 
+let saveTimeout = null;
 function saveAndBroadcastSettings() {
-  chrome.storage.sync.set(uiState.settings);
-  sendCommand('CMD_UPDATE_SETTINGS', { settings: uiState.settings });
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    chrome.storage.sync.set(uiState.settings);
+    sendCommand('CMD_UPDATE_SETTINGS', { settings: uiState.settings });
+  }, 50); // 50ms debounce
 }
 
 function populateVoices() {

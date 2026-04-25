@@ -62,22 +62,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 function initPlayer(text, startIndex, sentences = null) {
+    // 1. Cancel current playback but don't reset state yet
+    window.speechSynthesis.cancel();
+    
+    // 2. Load sentences
     if (sentences && Array.isArray(sentences)) {
         playerState.sentences = sentences;
-    } else {
+    } else if (text) {
         const sentenceRegex = /[^.!?]+[.!?]+["']?|[^.!?]+$/g;
         const rawSentences = text.match(sentenceRegex) || [text];
         playerState.sentences = rawSentences.map(s => s.trim()).filter(s => s.length > 0);
     }
+
+    // 3. Set the start position
     playerState.currentIndex = startIndex;
-    stop();
-    play();
+    playerState.isPlaying = true;
+    playerState.isPaused = false;
+
+    // 4. Start speaking
+    speakCurrentSentence();
 }
 
 function updateSettings(newSettings) {
+    const oldRate = playerState.settings.rate;
     playerState.settings = { ...playerState.settings, ...newSettings };
+    
+    // Only restart if playing and something that affects playback (like rate/voice) changed
     if (playerState.isPlaying && !playerState.isPaused) {
-        window.speechSynthesis.cancel();
         speakCurrentSentence();
     }
 }
@@ -86,11 +97,7 @@ function play() {
     if (playerState.sentences.length === 0) return;
     playerState.isPlaying = true;
     playerState.isPaused = false;
-    if (window.speechSynthesis.paused) {
-        window.speechSynthesis.resume();
-    } else {
-        speakCurrentSentence();
-    }
+    speakCurrentSentence();
     sendUpdate();
 }
 
@@ -102,11 +109,7 @@ function pause() {
 }
 
 function togglePlay() {
-    if (playerState.isPlaying) {
-        stop();
-    } else {
-        play();
-    }
+    togglePause();
 }
 
 function togglePause() {
