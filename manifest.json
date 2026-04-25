@@ -17,8 +17,20 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; frame-src https://assets.lsdsoftware.com"
+    "extension_pages": "script-src 'self'; object-src 'self'; frame-src https://assets.lsdsoftware.com https://ttstool.com"
   },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*",
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ]
+    }
+  ],
   "permissions": [
     "activeTab",
     "scripting",

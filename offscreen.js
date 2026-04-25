@@ -197,6 +197,13 @@ function speakCurrentSentence() {
     window.speechSynthesis.speak(utter);
 }
 
+// Ensure voices are loaded
+if (window.speechSynthesis.onvoiceschanged !== undefined) {
+    window.speechSynthesis.onvoiceschanged = () => {
+        console.log("Offscreen: Voices loaded.");
+    };
+}
+
 function sendUpdate() {
     chrome.runtime.sendMessage({
         type: 'UPDATE_UI',
