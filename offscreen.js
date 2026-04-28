@@ -27,6 +27,7 @@ chrome.storage.sync.get(['voiceName', 'rate', 'pitch', 'volume'], (data) => {
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    let isAsync = false;
     switch (msg.type) {
         case 'CMD_INIT':
             initPlayer(msg.text, msg.index || 0, msg.sentences, msg.settings);
@@ -58,6 +59,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         case 'CMD_TEST':
             testVoice();
             break;
+        case 'CMD_DETECT_LANG':
+            isAsync = true;
+            detectLanguage(msg.text)
+                .then(lang => sendResponse({ lang }))
+                .catch(err => sendResponse({ error: err.message }));
+            break;
         case 'CMD_GET_STATE':
             const state = {
                 isPlaying: playerState.isPlaying,
@@ -69,6 +76,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             sendUpdate();
             break;
     }
+    if (isAsync) return true;
 });
 
 function initPlayer(text, startIndex, sentences = null, settings = null) {
@@ -100,26 +108,37 @@ function initPlayer(text, startIndex, sentences = null, settings = null) {
 
 function updateSettings(newSettings) {
     const oldRate = playerState.settings.rate;
+    const oldVoice = playerState.settings.voiceName;
     playerState.settings = { ...playerState.settings, ...newSettings };
     
     // Only restart if playing and something that affects playback (like rate/voice) changed
     if (playerState.isPlaying && !playerState.isPaused) {
-        speakCurrentSentence();
+        if (oldRate !== playerState.settings.rate || oldVoice !== playerState.settings.voiceName) {
+            speakCurrentSentence();
+        }
     }
 }
 
 function play() {
     if (playerState.sentences.length === 0) return;
-    playerState.isPlaying = true;
-    playerState.isPaused = false;
-    speakCurrentSentence();
-    sendUpdate();
+    
+    if (playerState.isPaused) {
+        playerState.isPlaying = true;
+        playerState.isPaused = false;
+        window.speechSynthesis.resume();
+        sendUpdate();
+    } else {
+        playerState.isPlaying = true;
+        playerState.isPaused = false;
+        speakCurrentSentence();
+        sendUpdate();
+    }
 }
 
 function pause() {
     playerState.isPlaying = false;
     playerState.isPaused = true;
-    window.speechSynthesis.cancel();
+    window.speechSynthesis.pause();
     sendUpdate();
 }
 
@@ -146,16 +165,24 @@ function stop() {
 function next() {
     if (playerState.currentIndex < playerState.sentences.length - 1) {
         playerState.currentIndex++;
+        window.speechSynthesis.cancel();
         if (playerState.isPlaying) speakCurrentSentence();
-        else sendUpdate();
+        else {
+            playerState.isPaused = false;
+            sendUpdate();
+        }
     }
 }
 
 function prev() {
     if (playerState.currentIndex > 0) {
         playerState.currentIndex--;
+        window.speechSynthesis.cancel();
         if (playerState.isPlaying) speakCurrentSentence();
-        else sendUpdate();
+        else {
+            playerState.isPaused = false;
+            sendUpdate();
+        }
     }
 }
 
@@ -235,6 +262,10 @@ function sendUpdate() {
 }
 
 function testVoice() {
+    const wasPlaying = playerState.isPlaying;
+    const wasPaused = playerState.isPaused;
+    const savedIndex = playerState.currentIndex;
+    
     window.speechSynthesis.cancel();
     // Test logic: speak sample, don't mess with playback state
     const text = "Hi! You are currently testing the settings in the Read Aloud extension. Thank you for using our service. If you like it, please consider giving us a 5-star rating.";
@@ -249,6 +280,20 @@ function testVoice() {
         const v = voices.find(voice => voice.name === playerState.settings.voiceName);
         if (v) utter.voice = v;
     }
+
+    utter.onend = () => {
+        if (wasPlaying && !wasPaused) {
+            playerState.currentIndex = savedIndex;
+            playerState.isPlaying = true;
+            playerState.isPaused = false;
+            speakCurrentSentence();
+        } else if (wasPaused) {
+            playerState.currentIndex = savedIndex;
+            playerState.isPlaying = false;
+            playerState.isPaused = true;
+            sendUpdate();
+        }
+    };
 
     window.speechSynthesis.speak(utter);
 }
@@ -287,7 +332,12 @@ function detectLanguage(text) {
     const id = Math.random().toString(36).substr(2);
 
     return new Promise((resolve, reject) => {
-        fasttextPending[id] = { resolve, reject };
+        let timeoutId;
+        
+        fasttextPending[id] = { 
+            resolve: (val) => { clearTimeout(timeoutId); resolve(val); }, 
+            reject: (err) => { clearTimeout(timeoutId); reject(err); } 
+        };
 
         const request = {
             from: "fasttext-host",
@@ -299,6 +349,7 @@ function detectLanguage(text) {
         };
 
         if (!frame.contentWindow) {
+            delete fasttextPending[id];
             reject(new Error("FastText frame not ready"));
             return;
         }
@@ -306,23 +357,14 @@ function detectLanguage(text) {
         // Give the iframe a moment to load if just created
         setTimeout(() => {
             frame.contentWindow.postMessage(request, '*');
+            
+            timeoutId = setTimeout(() => {
+                if (fasttextPending[id]) {
+                    delete fasttextPending[id];
+                    reject(new Error("FastText timeout"));
+                }
+            }, 5000);
         }, 500);
-
-        setTimeout(() => {
-            if (fasttextPending[id]) {
-                delete fasttextPending[id];
-                reject(new Error("FastText timeout"));
-            }
-        }, 5000);
     });
 }
 
-// Handler for CMD_DETECT_LANG
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg.type === 'CMD_DETECT_LANG') {
-        detectLanguage(msg.text)
-            .then(lang => sendResponse({ lang }))
-            .catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-});

@@ -10,8 +10,6 @@
         "pdf-viewer.js"
       ],
       "matches": [
-        "http://*/*",
-        "https://*/*",
         "<all_urls>"
       ]
     }
@@ -22,8 +20,6 @@
   "content_scripts": [
     {
       "matches": [
-        "http://*/*",
-        "https://*/*",
         "<all_urls>"
       ],
       "js": [

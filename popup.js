@@ -32,6 +32,7 @@ let uiState = {
   sentences: [], // We keep a local copy for rendering
   currentIndex: 0,
   isPlaying: false,
+  isPaused: false,
   settings: {
     voiceName: null,
     rate: 1.0,
@@ -62,27 +63,31 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Auto-detect language and select voice if not set
     if (!uiState.settings.voiceName && rawText && rawText.trim().length > 20) {
-      chrome.runtime.sendMessage({ type: 'CMD_DETECT_LANG', text: rawText.slice(0, 500) }, (response) => {
-        if (response && response.lang) {
-          console.log("Detected Language:", response.lang);
-          const langCode = response.lang.split('-')[0].toLowerCase();
-
-          // Find matching voice
-          const matchingVoice = voices.find(v => v.lang.toLowerCase().startsWith(langCode));
-          if (matchingVoice && uiState.settings.voiceName !== matchingVoice.name) {
-            uiState.settings.voiceName = matchingVoice.name;
-            voiceSelect.value = matchingVoice.name;
-            updateSettings({ voiceName: matchingVoice.name });
+      chrome.runtime.sendMessage({ type: 'CMD_ENSURE_OFFSCREEN' }, () => {
+        chrome.runtime.sendMessage({ type: 'CMD_DETECT_LANG', text: rawText.slice(0, 500) }, (response) => {
+          if (response && response.lang) {
+            console.log("Detected Language:", response.lang);
+            const langCode = response.lang.split('-')[0].toLowerCase();
+  
+            // Find matching voice
+            const matchingVoice = voices.find(v => v.lang.toLowerCase().startsWith(langCode));
+            if (matchingVoice && uiState.settings.voiceName !== matchingVoice.name) {
+              uiState.settings.voiceName = matchingVoice.name;
+              voiceSelect.value = matchingVoice.name;
+              updateSettings({ voiceName: matchingVoice.name });
+            }
           }
-        }
+        });
       });
     }
 
     // Check if background player is already running (sync UI)
-    chrome.runtime.sendMessage({ type: 'CMD_GET_STATE' }, (response) => {
-      if (response && response.type === 'UPDATE_UI') {
-        handleUpdateUI(response.state);
-      }
+    chrome.runtime.sendMessage({ type: 'CMD_ENSURE_OFFSCREEN' }, () => {
+      chrome.runtime.sendMessage({ type: 'CMD_GET_STATE' }, (response) => {
+        if (response && response.type === 'UPDATE_UI') {
+          handleUpdateUI(response.state);
+        }
+      });
     });
   } catch (err) {
     console.error("Failed to get content:", err);
@@ -100,6 +105,7 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 function handleUpdateUI(state) {
   uiState.isPlaying = state.isPlaying;
+  uiState.isPaused = state.isPaused;
   uiState.currentIndex = state.currentIndex;
   togglePlayIcon(uiState.isPlaying);
   highlightCurrentSentence();
@@ -107,7 +113,9 @@ function handleUpdateUI(state) {
 }
 
 function sendCommand(type, payload = {}) {
-  chrome.runtime.sendMessage({ type, ...payload });
+  chrome.runtime.sendMessage({ type: 'CMD_ENSURE_OFFSCREEN' }, () => {
+    chrome.runtime.sendMessage({ type, ...payload });
+  });
 }
 
 // Helper to update local state and notify player, but NOT save to storage (ephemeral)
@@ -186,8 +194,8 @@ function highlightCurrentSentence() {
 
 function updateProgress() {
   if (uiState.sentences.length === 0) return;
-  const progress = ((uiState.currentIndex) / uiState.sentences.length) * 100;
-  progressBar.style.width = `${progress}%`;
+  const progress = ((uiState.currentIndex + 1) / uiState.sentences.length) * 100;
+  progressBar.style.width = `${Math.min(progress, 100)}%`;
 }
 
 function togglePlayIcon(isPlaying) {
@@ -306,14 +314,18 @@ function populateVoices() {
     const anyEnglish = voices.findIndex(v => v.lang.startsWith('en'));
     const defaultVoice = voices.findIndex(v => v.default);
     
-    if (googleEnglish !== -1) selectedIndex = googleEnglish;
-    else if (anyEnglish !== -1) selectedIndex = anyEnglish;
-    else if (defaultVoice !== -1) selectedIndex = defaultVoice;
-    else selectedIndex = 0;
-  }
+    let fallbackIndex = 0;
+    if (googleEnglish !== -1) fallbackIndex = googleEnglish;
+    else if (anyEnglish !== -1) fallbackIndex = anyEnglish;
+    else if (defaultVoice !== -1) fallbackIndex = defaultVoice;
 
-  voiceSelect.selectedIndex = selectedIndex;
-  uiState.settings.voiceName = voices[selectedIndex].name;
+    voiceSelect.selectedIndex = fallbackIndex;
+    if (!uiState.settings.voiceName) {
+      uiState.settings.voiceName = voices[fallbackIndex].name;
+    }
+  } else {
+    voiceSelect.selectedIndex = selectedIndex;
+  }
 }
 
 // --- Event Listeners ---
@@ -321,6 +333,8 @@ function populateVoices() {
 btnPlay.onclick = () => {
   if (uiState.isPlaying) {
     sendCommand('CMD_PAUSE');
+  } else if (uiState.isPaused) {
+    sendCommand('CMD_TOGGLE_PLAY');
   } else {
     // Init with current text and settings to be safe
     sendCommand('CMD_INIT', {
@@ -383,6 +397,6 @@ btnReset.onclick = () => {
 if (linkReportIssue) {
   linkReportIssue.onclick = (e) => {
     e.preventDefault();
-    chrome.tabs.create({ url: linkReportIssue.href });
+    chrome.tabs.create({ url: linkReportIssue.getAttribute('href') });
   };
 }

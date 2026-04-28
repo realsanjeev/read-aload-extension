@@ -126,9 +126,9 @@ function extractContentFromPage() {
         return textBlocks.filter(elem => {
             try {
                 const rect = elem.getBoundingClientRect();
-                return rect.left >= 0;
+                return rect.width > 0 && rect.height > 0;
             } catch (e) { return true; }
-        }).reverse(); // Stack was popped, so reverse to restore original document order
+        });
     }
 
     // 5. Gaussian distribution helpers
