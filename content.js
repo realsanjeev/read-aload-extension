@@ -176,7 +176,7 @@ function extractContentFromPage() {
     }
 
     function addMissingPunctuation(text = '') {
-        return text.replace(/(\w)(\s*?\r?\n)/g, '$1.$2');
+        return text.replace(/([^\s.,;:!?])([\t ]*\r?\n)/g, '$1.$2');
     }
 
     // 7. Core parse loop

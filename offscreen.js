@@ -15,6 +15,8 @@ let playerState = {
     utterance: null
 };
 
+let errorRetryCount = 0;
+
 // Initialize settings from storage
 chrome.storage.sync.get(['voiceName', 'rate', 'pitch', 'volume'], (data) => {
     if (data) {
@@ -70,7 +72,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 isPlaying: playerState.isPlaying,
                 isPaused: playerState.isPaused,
                 currentIndex: playerState.currentIndex,
-                totalSentences: playerState.sentences.length
+                totalSentences: playerState.sentences.length,
+                sentences: playerState.sentences
             };
             if (sendResponse) sendResponse({ type: 'UPDATE_UI', state });
             sendUpdate();
@@ -165,7 +168,6 @@ function stop() {
 function next() {
     if (playerState.currentIndex < playerState.sentences.length - 1) {
         playerState.currentIndex++;
-        window.speechSynthesis.cancel();
         if (playerState.isPlaying) speakCurrentSentence();
         else {
             playerState.isPaused = false;
@@ -177,7 +179,6 @@ function next() {
 function prev() {
     if (playerState.currentIndex > 0) {
         playerState.currentIndex--;
-        window.speechSynthesis.cancel();
         if (playerState.isPlaying) speakCurrentSentence();
         else {
             playerState.isPaused = false;
@@ -187,7 +188,6 @@ function prev() {
 }
 
 function jump(index) {
-    window.speechSynthesis.cancel();
     playerState.currentIndex = index;
     if (playerState.sentences.length > 0) {
         playerState.isPlaying = true;
@@ -197,7 +197,15 @@ function jump(index) {
 }
 
 function speakCurrentSentence() {
+    // Clear old handlers to prevent events firing during cancel
+    if (playerState.utterance) {
+        playerState.utterance.onend = null;
+        playerState.utterance.onerror = null;
+        playerState.utterance.onstart = null;
+    }
+    
     window.speechSynthesis.cancel();
+    
     if (playerState.currentIndex >= playerState.sentences.length) {
         playerState.isPlaying = false;
         sendUpdate();
@@ -206,6 +214,9 @@ function speakCurrentSentence() {
 
     const text = playerState.sentences[playerState.currentIndex];
     const utter = new SpeechSynthesisUtterance(text);
+    
+    // Retain global reference to prevent garbage collection stopping speech
+    playerState.utterance = utter;
 
     utter.rate = playerState.settings.rate;
     utter.pitch = playerState.settings.pitch;
@@ -217,7 +228,10 @@ function speakCurrentSentence() {
         if (v) utter.voice = v;
     }
 
-    utter.onstart = () => sendUpdate();
+    utter.onstart = () => {
+        errorRetryCount = 0;
+        sendUpdate();
+    };
 
     utter.onend = () => {
         if (playerState.isPlaying && !playerState.isPaused) {
@@ -233,8 +247,16 @@ function speakCurrentSentence() {
     utter.onerror = (e) => {
         if (e.error !== 'interrupted' && e.error !== 'canceled') {
             if (playerState.isPlaying) {
+                errorRetryCount++;
+                if (errorRetryCount > 3) {
+                    console.error("Too many errors, stopping playback");
+                    stop();
+                    return;
+                }
                 playerState.currentIndex++;
-                speakCurrentSentence();
+                setTimeout(() => {
+                    speakCurrentSentence();
+                }, 100);
             }
         }
     };
@@ -256,7 +278,8 @@ function sendUpdate() {
             isPlaying: playerState.isPlaying,
             isPaused: playerState.isPaused,
             currentIndex: playerState.currentIndex,
-            totalSentences: playerState.sentences.length
+            totalSentences: playerState.sentences.length,
+            sentences: playerState.sentences
         }
     });
 }

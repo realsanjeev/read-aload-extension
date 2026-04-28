@@ -58,40 +58,46 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Load Content
   try {
-    const rawText = await getPageContent();
-    initializeUI(rawText);
+    chrome.runtime.sendMessage({ type: 'CMD_ENSURE_OFFSCREEN' }, () => {
+      chrome.runtime.sendMessage({ type: 'CMD_GET_STATE' }, async (response) => {
+        try {
+          if (response && response.type === 'UPDATE_UI' && response.state.sentences && response.state.sentences.length > 0) {
+            // Restore from offscreen state
+            uiState.sentences = response.state.sentences;
+            uiState.lineBreaks = []; // Can't easily restore line breaks, so leave empty
+            renderSentences();
+            handleUpdateUI(response.state);
+          } else {
+            // Fresh extraction
+            const rawText = await getPageContent();
+            initializeUI(rawText);
 
-    // Auto-detect language and select voice if not set
-    if (!uiState.settings.voiceName && rawText && rawText.trim().length > 20) {
-      chrome.runtime.sendMessage({ type: 'CMD_ENSURE_OFFSCREEN' }, () => {
-        chrome.runtime.sendMessage({ type: 'CMD_DETECT_LANG', text: rawText.slice(0, 500) }, (response) => {
-          if (response && response.lang) {
-            console.log("Detected Language:", response.lang);
-            const langCode = response.lang.split('-')[0].toLowerCase();
-  
-            // Find matching voice
-            const matchingVoice = voices.find(v => v.lang.toLowerCase().startsWith(langCode));
-            if (matchingVoice && uiState.settings.voiceName !== matchingVoice.name) {
-              uiState.settings.voiceName = matchingVoice.name;
-              voiceSelect.value = matchingVoice.name;
-              updateSettings({ voiceName: matchingVoice.name });
+            // Auto-detect language and select voice if not set
+            if (!uiState.settings.voiceName && rawText && rawText.trim().length > 20) {
+              chrome.runtime.sendMessage({ type: 'CMD_DETECT_LANG', text: rawText.slice(0, 500) }, (langResponse) => {
+                if (langResponse && langResponse.lang) {
+                  console.log("Detected Language:", langResponse.lang);
+                  const langCode = langResponse.lang.split('-')[0].toLowerCase();
+        
+                  // Find matching voice
+                  const matchingVoice = voices.find(v => v.lang.toLowerCase().startsWith(langCode));
+                  if (matchingVoice && uiState.settings.voiceName !== matchingVoice.name) {
+                    uiState.settings.voiceName = matchingVoice.name;
+                    voiceSelect.value = matchingVoice.name;
+                    updateSettings({ voiceName: matchingVoice.name });
+                  }
+                }
+              });
             }
           }
-        });
-      });
-    }
-
-    // Check if background player is already running (sync UI)
-    chrome.runtime.sendMessage({ type: 'CMD_ENSURE_OFFSCREEN' }, () => {
-      chrome.runtime.sendMessage({ type: 'CMD_GET_STATE' }, (response) => {
-        if (response && response.type === 'UPDATE_UI') {
-          handleUpdateUI(response.state);
+        } catch (err) {
+          console.error("Failed to get content:", err);
+          textContent.innerHTML = `<p class="error">Could not read page: ${err.message}</p>`;
         }
       });
     });
   } catch (err) {
-    console.error("Failed to get content:", err);
-    textContent.innerHTML = `<p class="error">Could not read page: ${err.message}</p>`;
+    console.error("Initialization error:", err);
   }
 });
 
