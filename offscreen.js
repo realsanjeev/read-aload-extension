@@ -15,11 +15,21 @@ let playerState = {
     utterance: null
 };
 
+// Initialize settings from storage
+chrome.storage.sync.get(['voiceName', 'rate', 'pitch', 'volume'], (data) => {
+    if (data) {
+        playerState.settings.voiceName = data.voiceName || null;
+        playerState.settings.rate = parseFloat(data.rate) || 1.0;
+        playerState.settings.pitch = parseFloat(data.pitch) || 1.0;
+        playerState.settings.volume = parseFloat(data.volume) || 1.0;
+    }
+});
+
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     switch (msg.type) {
         case 'CMD_INIT':
-            initPlayer(msg.text, msg.index || 0, msg.sentences);
+            initPlayer(msg.text, msg.index || 0, msg.sentences, msg.settings);
             break;
         case 'CMD_PLAY':
             play();
@@ -61,11 +71,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 });
 
-function initPlayer(text, startIndex, sentences = null) {
+function initPlayer(text, startIndex, sentences = null, settings = null) {
     // 1. Cancel current playback but don't reset state yet
     window.speechSynthesis.cancel();
     
-    // 2. Load sentences
+    // 2. Load settings if provided
+    if (settings) {
+        playerState.settings = { ...playerState.settings, ...settings };
+    }
+    
+    // 3. Load sentences
     if (sentences && Array.isArray(sentences)) {
         playerState.sentences = sentences;
     } else if (text) {

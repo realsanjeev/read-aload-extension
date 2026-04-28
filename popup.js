@@ -322,10 +322,11 @@ btnPlay.onclick = () => {
   if (uiState.isPlaying) {
     sendCommand('CMD_PAUSE');
   } else {
-    // Init with current text to be safe
+    // Init with current text and settings to be safe
     sendCommand('CMD_INIT', {
       sentences: uiState.sentences, 
-      index: uiState.currentIndex
+      index: uiState.currentIndex,
+      settings: uiState.settings
     });
   }
 };
