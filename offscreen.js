@@ -1,8 +1,8 @@
-// offscreen.js
-// This script runs in a hidden document and handles the actual speech synthesis.
+// offscreen.js - Text-to-Speech Engine
 
 let playerState = {
     sentences: [],
+    lineBreaks: [], // Indices in sentences array where a paragraph break should occur
     currentIndex: 0,
     isPlaying: false,
     isPaused: false,
@@ -15,72 +15,137 @@ let playerState = {
     utterance: null
 };
 
-// Listen for messages from popup
+let errorRetryCount = 0;
+
+// Settings are initialized via CMD_INIT and CMD_UPDATE_SETTINGS messages from the popup
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.type === 'PING') {
+        sendResponse({ type: 'PONG' });
+        return;
+    }
+
+    // Ignore direct broadcasts from the popup; only accept commands proxied by the background service worker
+    if (msg.type && msg.type.startsWith('CMD_') && !msg._forwarded) {
+        return;
+    }
+
+    let isAsync = false;
     switch (msg.type) {
         case 'CMD_INIT':
-            initPlayer(msg.text, msg.index || 0);
+            console.log("Offscreen: CMD_INIT received, text length:", msg.text ? msg.text.length : 0);
+            initPlayer(msg.text, msg.index || 0, msg.settings, false);
+            sendResponse({ status: 'ok' });
             break;
         case 'CMD_PLAY':
             play();
+            sendResponse({ status: 'ok' });
             break;
         case 'CMD_TOGGLE_PLAY':
             togglePlay();
+            sendResponse({ status: 'ok' });
             break;
         case 'CMD_PAUSE':
             togglePause();
+            sendResponse({ status: 'ok' });
             break;
         case 'CMD_STOP':
             stop();
+            sendResponse({ status: 'ok' });
             break;
         case 'CMD_NEXT':
             next();
+            sendResponse({ status: 'ok' });
             break;
         case 'CMD_PREV':
             prev();
+            sendResponse({ status: 'ok' });
             break;
         case 'CMD_JUMP':
-            jump(msg.index);
+            initPlayer(null, msg.index, null, true);
+            sendResponse({ status: 'ok' });
             break;
         case 'CMD_UPDATE_SETTINGS':
             updateSettings(msg.settings);
+            sendResponse({ status: 'ok' });
             break;
         case 'CMD_TEST':
             testVoice();
+            sendResponse({ status: 'ok' });
+            break;
+        case 'CMD_DETECT_LANG':
+            detectLanguage(msg.text)
+                .then(lang => sendResponse({ lang }))
+                .catch(err => sendResponse({ error: err.message }));
             break;
         case 'CMD_GET_STATE':
-            sendUpdate();
+            sendUpdate(sendResponse);
             break;
     }
+    return true; // Always return true to keep the message channel open
 });
 
-function initPlayer(text, startIndex) {
-    const sentenceRegex = /[^.!?]+[.!?]+["']?|[^.!?]+$/g;
-    const rawSentences = text.match(sentenceRegex) || [text];
-    playerState.sentences = rawSentences.map(s => s.trim()).filter(s => s.length > 0);
-    playerState.currentIndex = startIndex;
-    stop();
-    play();
+/**
+ * Initializes the player with new text.
+ * Standardizes splitting to provide both sentences and visual breaks to the UI.
+ */
+function initPlayer(text, startIndex, settings = null, autoPlay = false) {
+    window.speechSynthesis.cancel();
+    
+    if (settings) {
+        playerState.settings = { ...playerState.settings, ...settings };
+    }
+
+    if (text) {
+        const lines = text.split(/\n+/);
+        playerState.sentences = [];
+        playerState.lineBreaks = [];
+
+        lines.forEach(line => {
+            const trimmedLine = line.trim();
+            if (trimmedLine.length === 0) return;
+
+            if (playerState.sentences.length > 0) {
+                playerState.lineBreaks.push(playerState.sentences.length);
+            }
+
+            const sentenceRegex = /[^.!?]+[.!?]+["']?|[^.!?]+$/g;
+            const lineSentences = trimmedLine.match(sentenceRegex) || [trimmedLine];
+            playerState.sentences.push(...lineSentences.map(s => s.trim()).filter(s => s.length > 0));
+        });
+    }
+
+    playerState.currentIndex = Math.min(startIndex, playerState.sentences.length - 1);
+    if (playerState.currentIndex < 0) playerState.currentIndex = 0;
+    
+    playerState.isPlaying = autoPlay;
+    playerState.isPaused = false;
+
+    if (autoPlay) {
+        speakCurrentSentence();
+    } else {
+        sendUpdate();
+    }
 }
 
 function updateSettings(newSettings) {
+    const oldRate = playerState.settings.rate;
+    const oldVoice = playerState.settings.voiceName;
     playerState.settings = { ...playerState.settings, ...newSettings };
+    
     if (playerState.isPlaying && !playerState.isPaused) {
-        window.speechSynthesis.cancel();
-        speakCurrentSentence();
+        if (oldRate !== playerState.settings.rate || oldVoice !== playerState.settings.voiceName) {
+            speakCurrentSentence();
+        }
     }
 }
 
 function play() {
     if (playerState.sentences.length === 0) return;
+    
     playerState.isPlaying = true;
     playerState.isPaused = false;
-    if (window.speechSynthesis.paused) {
-        window.speechSynthesis.resume();
-    } else {
-        speakCurrentSentence();
-    }
-    sendUpdate();
+    speakCurrentSentence();
 }
 
 function pause() {
@@ -91,19 +156,15 @@ function pause() {
 }
 
 function togglePlay() {
-    if (playerState.isPlaying) {
-        stop();
+    if (playerState.isPlaying && !playerState.isPaused) {
+        pause();
     } else {
         play();
     }
 }
 
 function togglePause() {
-    if (playerState.isPlaying) {
-        pause();
-    } else {
-        play();
-    }
+    togglePlay();
 }
 
 function stop() {
@@ -131,7 +192,6 @@ function prev() {
 }
 
 function jump(index) {
-    window.speechSynthesis.cancel();
     playerState.currentIndex = index;
     if (playerState.sentences.length > 0) {
         playerState.isPlaying = true;
@@ -141,7 +201,13 @@ function jump(index) {
 }
 
 function speakCurrentSentence() {
+    if (playerState.utterance) {
+        playerState.utterance.onend = null;
+        playerState.utterance.onerror = null;
+    }
+    
     window.speechSynthesis.cancel();
+    
     if (playerState.currentIndex >= playerState.sentences.length) {
         playerState.isPlaying = false;
         sendUpdate();
@@ -150,18 +216,29 @@ function speakCurrentSentence() {
 
     const text = playerState.sentences[playerState.currentIndex];
     const utter = new SpeechSynthesisUtterance(text);
+    playerState.utterance = utter;
 
     utter.rate = playerState.settings.rate;
     utter.pitch = playerState.settings.pitch;
     utter.volume = playerState.settings.volume;
 
     const voices = window.speechSynthesis.getVoices();
+    if (voices.length === 0) {
+        // Voices not loaded yet, wait a bit and retry
+        console.warn("Offscreen: Voices not loaded yet, waiting...");
+        setTimeout(speakCurrentSentence, 100);
+        return;
+    }
+
     if (playerState.settings.voiceName) {
         const v = voices.find(voice => voice.name === playerState.settings.voiceName);
         if (v) utter.voice = v;
     }
 
-    utter.onstart = () => sendUpdate();
+    utter.onstart = () => {
+        errorRetryCount = 0;
+        sendUpdate();
+    };
 
     utter.onend = () => {
         if (playerState.isPlaying && !playerState.isPaused) {
@@ -176,60 +253,121 @@ function speakCurrentSentence() {
 
     utter.onerror = (e) => {
         if (e.error !== 'interrupted' && e.error !== 'canceled') {
+            console.error("TTS Error:", e.error);
             if (playerState.isPlaying) {
-                playerState.currentIndex++;
-                speakCurrentSentence();
+                errorRetryCount++;
+                if (errorRetryCount > 3) {
+                    playerState.currentIndex++;
+                    errorRetryCount = 0;
+                }
+                setTimeout(speakCurrentSentence, 100);
             }
         }
     };
 
-    window.speechSynthesis.speak(utter);
+    setTimeout(() => {
+        window.speechSynthesis.speak(utter);
+    }, 50);
 }
 
-function sendUpdate() {
-    chrome.runtime.sendMessage({
-        type: 'UPDATE_UI',
-        state: {
-            isPlaying: playerState.isPlaying,
-            isPaused: playerState.isPaused,
-            currentIndex: playerState.currentIndex,
-            totalSentences: playerState.sentences.length
-        }
-    });
+function sendUpdate(sendResponse = null) {
+    const state = {
+        isPlaying: playerState.isPlaying,
+        isPaused: playerState.isPaused,
+        currentIndex: playerState.currentIndex,
+        totalSentences: playerState.sentences.length,
+        sentences: playerState.sentences,
+        lineBreaks: playerState.lineBreaks
+    };
+
+    if (sendResponse) {
+        sendResponse({ type: 'UPDATE_UI', state });
+    } else {
+        chrome.runtime.sendMessage({ type: 'UPDATE_UI', state }, () => {
+            if (chrome.runtime.lastError) { /* ignore */ }
+        });
+    }
 }
 
 function testVoice() {
+    const wasPlaying = playerState.isPlaying;
+    const wasPaused = playerState.isPaused;
+    const savedIndex = playerState.currentIndex;
+    
     window.speechSynthesis.cancel();
-    // Test logic: speak sample, don't mess with playback state
-    const text = "Hi! You are currently testing the settings in the Read Aloud extension. Thank you for using our service. If you like it, please consider giving us a 5-star rating.";
+    
+    const text = "This is a test of your selected voice.";
     const utter = new SpeechSynthesisUtterance(text);
+    playerState.utterance = utter;
 
     utter.rate = playerState.settings.rate;
     utter.pitch = playerState.settings.pitch;
     utter.volume = playerState.settings.volume;
 
     const voices = window.speechSynthesis.getVoices();
+    if (voices.length === 0) {
+        console.warn("Offscreen: Voices not loaded for test, waiting...");
+        setTimeout(testVoice, 100);
+        return;
+    }
+
     if (playerState.settings.voiceName) {
         const v = voices.find(voice => voice.name === playerState.settings.voiceName);
         if (v) utter.voice = v;
     }
 
-    window.speechSynthesis.speak(utter);
+    const restoreState = () => {
+        if (wasPlaying && !wasPaused) {
+            playerState.currentIndex = savedIndex;
+            playerState.isPlaying = true;
+            playerState.isPaused = false;
+            speakCurrentSentence();
+        } else {
+            sendUpdate();
+        }
+    };
+
+    utter.onend = restoreState;
+    utter.onerror = restoreState;
+    setTimeout(() => {
+        window.speechSynthesis.speak(utter);
+    }, 50);
 }
+
+// --- Language Detection remains same (using external iframe for now) ---
+// [Language detection code follows...]
 
 // --- FastText Language Detection ---
 
 let fasttextFrame = null;
 let fasttextPending = {};
+let isFasttextReady = false;
+let fasttextQueue = [];
 
 function getFasttextFrame() {
     if (!fasttextFrame) {
         fasttextFrame = document.createElement('iframe');
         fasttextFrame.src = 'https://ttstool.com/fasttext/index.html';
         fasttextFrame.style.display = 'none';
+        
+        fasttextFrame.onload = () => {
+            isFasttextReady = true;
+            fasttextQueue.forEach(req => fasttextFrame.contentWindow.postMessage(req, '*'));
+            fasttextQueue = [];
+        };
+
+        fasttextFrame.onerror = () => {
+            fasttextQueue = [];
+            for (let id in fasttextPending) {
+                fasttextPending[id].reject(new Error("FastText frame failed to load"));
+                delete fasttextPending[id];
+            }
+        };
+
         document.body.appendChild(fasttextFrame);
 
         window.addEventListener('message', e => {
+            if (e.origin !== 'https://ttstool.com') return;
             if (e.source === fasttextFrame.contentWindow) {
                 handleFasttextMessage(e.data);
             }
@@ -251,7 +389,12 @@ function detectLanguage(text) {
     const id = Math.random().toString(36).substr(2);
 
     return new Promise((resolve, reject) => {
-        fasttextPending[id] = { resolve, reject };
+        let timeoutId;
+        
+        fasttextPending[id] = { 
+            resolve: (val) => { clearTimeout(timeoutId); resolve(val); }, 
+            reject: (err) => { clearTimeout(timeoutId); reject(err); } 
+        };
 
         const request = {
             from: "fasttext-host",
@@ -262,17 +405,13 @@ function detectLanguage(text) {
             args: [text]
         };
 
-        if (!frame.contentWindow) {
-            reject(new Error("FastText frame not ready"));
-            return;
-        }
-
-        // Give the iframe a moment to load if just created
-        setTimeout(() => {
+        if (isFasttextReady && frame.contentWindow) {
             frame.contentWindow.postMessage(request, '*');
-        }, 500);
-
-        setTimeout(() => {
+        } else {
+            fasttextQueue.push(request);
+        }
+            
+        timeoutId = setTimeout(() => {
             if (fasttextPending[id]) {
                 delete fasttextPending[id];
                 reject(new Error("FastText timeout"));
@@ -281,12 +420,3 @@ function detectLanguage(text) {
     });
 }
 
-// Handler for CMD_DETECT_LANG
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg.type === 'CMD_DETECT_LANG') {
-        detectLanguage(msg.text)
-            .then(lang => sendResponse({ lang }))
-            .catch(err => sendResponse({ error: err.message }));
-        return true;
-    }
-});

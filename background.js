@@ -1,66 +1,98 @@
-// background.js
+// background.js - Orchestrator for Speak Aloud Extension
 
-// Offscreen document path
-const OFFSCREEN_DOCUMENT_PATH = 'offscreen.html';
+let offscreenCreated = false;
+let offscreenCreating = null;
+const OFFSCREEN_DOCUMENT_PATH = chrome.runtime.getURL('offscreen.html');
 
-// Create the offscreen document if it doesn't already exist
-async function setupOffscreenDocument(path) {
-    // Check if an offscreen document already exists
-    const existingContexts = await chrome.runtime.getContexts({
-        contextTypes: ['OFFSCREEN_DOCUMENT'],
-        documentUrls: [path]
-    });
+/**
+ * Ensures the offscreen document is created and ready to receive messages.
+ */
+async function ensureOffscreen() {
+    if (offscreenCreated) return;
+    if (offscreenCreating) return offscreenCreating;
 
-    if (existingContexts.length > 0) {
+    offscreenCreating = (async () => {
+        try {
+            const existingContexts = await chrome.runtime.getContexts({
+                contextTypes: ['OFFSCREEN_DOCUMENT'],
+                documentUrls: [OFFSCREEN_DOCUMENT_PATH]
+            });
+
+            if (existingContexts.length === 0) {
+                await chrome.offscreen.createDocument({
+                    url: OFFSCREEN_DOCUMENT_PATH,
+                    reasons: ['AUDIO_PLAYBACK'],
+                    justification: 'Text-to-Speech playback',
+                });
+            }
+
+            offscreenCreated = true;
+        } finally {
+            offscreenCreating = null;
+        }
+    })();
+
+    return offscreenCreating;
+}
+
+// Removed waitForOffscreenReady as createDocument ensures readiness
+
+// Proxy messages to offscreen
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    // Security: Validate sender origin if present
+    if (sender.id && sender.id !== chrome.runtime.id) {
+        console.warn("Unauthorized message origin:", sender.id);
         return;
     }
 
-    // Create offscreen document
-    if (creating) {
-        await creating;
-    } else {
-        creating = chrome.offscreen.createDocument({
-            url: path,
-            reasons: ['AUDIO_PLAYBACK'],
-            justification: 'Playback of article text in the background',
+    // Internal background commands
+    if (msg.type === 'CMD_ENSURE_OFFSCREEN') {
+        ensureOffscreen()
+            .then(() => sendResponse({ status: 'ok' }))
+            .catch(err => sendResponse({ status: 'error', message: err.message }));
+        return true;
+    }
+
+    // Forward player commands to offscreen
+    if (msg.type && (msg.type.startsWith('CMD_') || msg.type === 'CMD_GET_STATE')) {
+        if (msg._forwarded) return; // Prevent infinite recursion
+
+        console.log("Background: Forwarding command to offscreen:", msg.type);
+        ensureOffscreen().then(() => {
+            const expectsResponse = ['CMD_GET_STATE', 'CMD_DETECT_LANG'].includes(msg.type);
+            
+            if (expectsResponse) {
+                chrome.runtime.sendMessage({ ...msg, _forwarded: true }, (response) => {
+                    if (chrome.runtime.lastError) {
+                        console.warn("Proxy error:", chrome.runtime.lastError.message);
+                        sendResponse({ status: 'error', message: chrome.runtime.lastError.message });
+                    } else {
+                        sendResponse(response);
+                    }
+                });
+            } else {
+                chrome.runtime.sendMessage({ ...msg, _forwarded: true });
+                sendResponse({ status: 'ok' });
+            }
         });
-        await creating;
-        creating = null;
-    }
-}
-
-let creating; // A global promise to avoid concurrency issues
-
-// Listen for messages from popup
-chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
-    // Ensure offscreen document exists when we need to play or test or detect lang
-    if (msg.type === 'CMD_PLAY' || msg.type === 'CMD_INIT' || msg.type === 'CMD_TEST' || msg.type === 'CMD_DETECT_LANG') {
-        await setupOffscreenDocument(OFFSCREEN_DOCUMENT_PATH);
-    }
-
-    // Proxy detect lang to offscreen
-    if (msg.type === 'CMD_DETECT_LANG') {
-        chrome.runtime.sendMessage(msg, sendResponse);
-        return true; // Wait for async response
+        return true;
     }
 });
+
 // Listen for keyboard commands
 chrome.commands.onCommand.addListener(async (command) => {
-    // Ensure offscreen document exists before sending commands
-    await setupOffscreenDocument(OFFSCREEN_DOCUMENT_PATH);
-
-    switch (command) {
-        case 'play_stop':
-            chrome.runtime.sendMessage({ type: 'CMD_TOGGLE_PLAY' });
-            break;
-        case 'pause_resume':
-            chrome.runtime.sendMessage({ type: 'CMD_PAUSE' });
-            break;
-        case 'forward':
-            chrome.runtime.sendMessage({ type: 'CMD_NEXT' });
-            break;
-        case 'rewind':
-            chrome.runtime.sendMessage({ type: 'CMD_PREV' });
-            break;
+    try {
+        await ensureOffscreen();
+        const msgMap = {
+            'play_stop': 'CMD_TOGGLE_PLAY',
+            'pause_resume': 'CMD_PAUSE',
+            'forward': 'CMD_NEXT',
+            'rewind': 'CMD_PREV'
+        };
+        if (msgMap[command]) {
+            chrome.runtime.sendMessage({ type: msgMap[command], _forwarded: true });
+        }
+    } catch (e) {
+        console.error("Keyboard command failed:", e);
     }
 });
