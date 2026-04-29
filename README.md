@@ -38,6 +38,12 @@ A premium Text-to-Speech (TTS) Chrome Extension that automatically detects and r
 - **scripting**: Used to inject the extraction logic into the page.
 - **storage**: Used to save your voice and speed preferences.
 
+
+## Commands
+- <kdb>Alt</kdb> + <kdb>O</kdb>: Play/Stop the audio
+- <kdb>Alt</kdb> + <kdb>P</kdb>: Pause/resume the audio
+- <kdb>Alt</kdb> + <kdb>.</kdb>: Next Sentence
+- <kdb>Alt</kdb> + <kdb>,</kdb>: Previous sentence
 ### References:
 - Icon based on: [Flaticon Megaphone](https://www.flaticon.com/free-icon/megaphone_9018879)
 - [Chrome Extension Manifest - Developer Docs](https://developer.chrome.com/docs/extensions/reference/manifest)

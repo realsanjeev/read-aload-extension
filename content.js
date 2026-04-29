@@ -12,7 +12,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             console.error("[ReadAloud] Extraction failed:", err);
             sendResponse({ error: err.message });
         }
-        return true; // Keep channel open
     }
 });
 
@@ -22,7 +21,10 @@ function extractContentFromPage() {
     if (selection.length > 0) return selection;
 
     // 2. Define configuration
-    const ignoreTags = 'select, textarea, button, label, audio, video, dialog, embed, menu, nav, noframes, noscript, object, script, style, svg, aside, footer, #footer, .no-read-aloud, [aria-hidden="true"], .ads, .ad-container, .sidebar, .social-share, [class*="ad-"], [id*="ad-"], .btn, .term-edit-btn, .ai-model-badge';
+    const ignoreTags = 'select, textarea, button, label, audio, video, dialog, embed, menu, nav, noframes, noscript, object, script, style, svg, aside, footer, #footer, .footer, .no-read-aloud, [aria-hidden="true"], .ads, .ad-container, .sidebar, .social-share, [class*="ad-"], [id*="ad-"], .btn, .term-edit-btn, .ai-model-badge';
+
+    // Set to track elements that require multi-block processing
+    const multiBlockElems = new Set();
 
     // 3. Helper functions (Optimized)
     const isVisible = (elem) => {
@@ -38,14 +40,14 @@ function extractContentFromPage() {
         return style.float === 'right' || style.position === 'fixed';
     };
 
-    const getInnerText = (elem) => (elem.innerText || '').trim();
+    const getInnerText = (elem) => (elem.textContent || '').trim();
 
-    const isTextNode = (node) => node.nodeType === 3 && node.nodeValue.trim().length >= 3;
+    const isTextNode = (node, threshold) => node.nodeType === 3 && node.nodeValue.trim().length >= threshold;
 
     const hasTextNodes = (elem, threshold) => {
         let child = elem.firstChild;
         while (child) {
-            if (isTextNode(child) && child.nodeValue.trim().length >= threshold) return true;
+            if (isTextNode(child, threshold)) return true;
             child = child.nextSibling;
         }
         return false;
@@ -54,7 +56,7 @@ function extractContentFromPage() {
     const hasParagraphs = (elem, threshold) => {
         let child = elem.firstChild;
         while (child) {
-            if (child.nodeType === 1 && child.tagName === 'P' && isVisible(child) && getInnerText(child).length >= threshold) return true;
+            if (child.nodeType === 1 && child.tagName === 'P' && getInnerText(child).length >= threshold) return true;
             child = child.nextSibling;
         }
         return false;
@@ -81,7 +83,7 @@ function extractContentFromPage() {
                     const rows = Array.from(elem.children);
                     if (rows.length > 3 || (rows[0] && rows[0].children.length > 3)) {
                         textBlocks.push(elem);
-                        elem.dataset.readAloudMultiBlock = 'true';
+                        multiBlockElems.add(elem);
                     } else {
                         for (let i = rows.length - 1; i >= 0; i--) stack.push(rows[i]);
                     }
@@ -103,10 +105,10 @@ function extractContentFromPage() {
                 textBlocks.push(elem);
             } else if (hasParagraphs(elem, threshold)) {
                 textBlocks.push(elem);
-                elem.dataset.readAloudMultiBlock = 'true';
+                multiBlockElems.add(elem);
             } else {
                 // Not a block itself, push children to stack (in reverse to maintain order)
-                const children = elem.shadowRoot ? [...elem.children, ...elem.shadowRoot.children] : elem.children;
+                const children = elem.shadowRoot ? Array.from(elem.shadowRoot.children) : Array.from(elem.children);
                 for (let i = children.length - 1; i >= 0; i--) {
                     const child = children[i];
                     try {
@@ -118,7 +120,12 @@ function extractContentFromPage() {
                 
                 // Also check for iframes (if same-origin)
                 if (tagName === 'IFRAME' || tagName === 'FRAME') {
-                   try { stack.push(elem.contentDocument.body); } catch(e) {}
+                   try { 
+                       const doc = elem.contentDocument;
+                       if (doc && doc.readyState === 'complete' && doc.body) {
+                           stack.push(doc.body);
+                       }
+                   } catch(e) {}
                 }
             }
         }
@@ -166,10 +173,10 @@ function extractContentFromPage() {
         if (clone.tagName === 'OL' || clone.tagName === 'UL') addNumbering(clone);
 
         let result;
-        if (elem.dataset && elem.dataset.readAloudMultiBlock) {
-            result = Array.from(clone.children).map(c => addMissingPunctuation(c.innerText).trim());
+        if (multiBlockElems.has(elem)) {
+            result = Array.from(clone.children).map(c => addMissingPunctuation(c.textContent || '').trim());
         } else {
-            result = addMissingPunctuation(clone.innerText).trim().split(/(?:\s*\r?\n\s*){2,}/);
+            result = addMissingPunctuation(clone.textContent || '').trim().split(/(?:\s*\r?\n\s*){2,}/);
         }
 
         return result;
@@ -185,8 +192,8 @@ function extractContentFromPage() {
         let totalChars = textBlocks.reduce((s, e) => s + getInnerText(e).length, 0);
 
         if (totalChars < 1000) {
-            textBlocks = findTextBlocks(3);
-            const texts = textBlocks.map(getInnerText);
+            const candidateBlocks = findTextBlocks(3);
+            const texts = candidateBlocks.map(getInnerText);
             if (texts.length > 6) {
                 let head = null, tail = null;
                 for (let i = 3; i < texts.length && head === null; i++) {
@@ -197,25 +204,35 @@ function extractContentFromPage() {
                     const g = getGaussian(texts, i + 1, texts.length);
                     if (texts[i].length > g.mean + 2 * g.stdev) tail = i + 1;
                 }
-                if (head !== null || tail !== null) textBlocks = textBlocks.slice(head || 0, tail || textBlocks.length);
+                if (head !== null || tail !== null) {
+                    textBlocks = candidateBlocks.slice(head || 0, tail || candidateBlocks.length);
+                } else {
+                    textBlocks = candidateBlocks;
+                }
+            } else {
+                textBlocks = candidateBlocks;
             }
         }
 
-        // Logic for headings (simplified/optimized version of findHeadingsFor)
-        const finalContent = [];
-        textBlocks.forEach(block => {
-            // We could add heading detection here if needed, keeping it simple for now
-            finalContent.push(block);
-        });
+        let results = textBlocks.flatMap(getTexts).filter(t => t && t.length > 0);
+        
+        // Fallback: If still nothing, try common article containers
+        if (results.length === 0) {
+            const fallbackSelector = 'article, main, [role="main"], .main, .content, .post, .article, #content, #main';
+            const main = document.querySelector(fallbackSelector);
+            if (main) {
+                results = getTexts(main).filter(t => t && t.length > 0);
+            }
+        }
 
-        return finalContent.flatMap(getTexts).filter(t => t && t.length > 0);
+        return results;
     }
 
     // 8. Run
     try {
         const texts = parse();
-        return texts.length > 0 ? texts.join('\n\n') : addMissingPunctuation(document.body.innerText).split(/(?:\s*\r?\n\s*){2,}/).filter(t => t.trim().length >= 3).join('\n\n');
+        return texts.length > 0 ? texts.join('\n\n') : '';
     } catch (e) {
-        return document.body.innerText;
+        return '';
     }
 }
