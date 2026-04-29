@@ -167,7 +167,7 @@ async function getPageContent() {
     try {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        files: ['content.js']
+        files: ['Readability.js', 'content.js']
       });
       await new Promise(r => setTimeout(r, 200)); // Wait for script init
       response = await trySendMessage();

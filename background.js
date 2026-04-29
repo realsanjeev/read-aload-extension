@@ -35,6 +35,16 @@ async function ensureOffscreen() {
     return offscreenCreating;
 }
 
+async function closeOffscreen() {
+    if (!offscreenCreated) return;
+    try {
+        await chrome.offscreen.closeDocument();
+    } catch (e) {
+        console.warn("Failed to close offscreen:", e);
+    }
+    offscreenCreated = false;
+}
+
 // Removed waitForOffscreenReady as createDocument ensures readiness
 
 // Proxy messages to offscreen
@@ -73,6 +83,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             } else {
                 chrome.runtime.sendMessage({ ...msg, _forwarded: true });
                 sendResponse({ status: 'ok' });
+            }
+
+            if (msg.type === 'CMD_STOP') {
+                // Give it a moment to send the STOP update to UI, then close
+                setTimeout(closeOffscreen, 500);
             }
         });
         return true;

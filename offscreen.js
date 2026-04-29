@@ -334,89 +334,21 @@ function testVoice() {
     }, 50);
 }
 
-// --- Language Detection remains same (using external iframe for now) ---
-// [Language detection code follows...]
-
-// --- FastText Language Detection ---
-
-let fasttextFrame = null;
-let fasttextPending = {};
-let isFasttextReady = false;
-let fasttextQueue = [];
-
-function getFasttextFrame() {
-    if (!fasttextFrame) {
-        fasttextFrame = document.createElement('iframe');
-        fasttextFrame.src = 'https://ttstool.com/fasttext/index.html';
-        fasttextFrame.style.display = 'none';
-        
-        fasttextFrame.onload = () => {
-            isFasttextReady = true;
-            fasttextQueue.forEach(req => fasttextFrame.contentWindow.postMessage(req, '*'));
-            fasttextQueue = [];
-        };
-
-        fasttextFrame.onerror = () => {
-            fasttextQueue = [];
-            for (let id in fasttextPending) {
-                fasttextPending[id].reject(new Error("FastText frame failed to load"));
-                delete fasttextPending[id];
-            }
-        };
-
-        document.body.appendChild(fasttextFrame);
-
-        window.addEventListener('message', e => {
-            if (e.origin !== 'https://ttstool.com') return;
-            if (e.source === fasttextFrame.contentWindow) {
-                handleFasttextMessage(e.data);
-            }
-        });
-    }
-    return fasttextFrame;
-}
-
-function handleFasttextMessage(msg) {
-    if (msg.type === 'response' && msg.id && fasttextPending[msg.id]) {
-        if (msg.error) fasttextPending[msg.id].reject(new Error(msg.error));
-        else fasttextPending[msg.id].resolve(msg.result);
-        delete fasttextPending[msg.id];
-    }
-}
+// --- Language Detection ---
 
 function detectLanguage(text) {
-    const frame = getFasttextFrame();
-    const id = Math.random().toString(36).substr(2);
-
     return new Promise((resolve, reject) => {
-        let timeoutId;
-        
-        fasttextPending[id] = { 
-            resolve: (val) => { clearTimeout(timeoutId); resolve(val); }, 
-            reject: (err) => { clearTimeout(timeoutId); reject(err); } 
-        };
-
-        const request = {
-            from: "fasttext-host",
-            to: "fasttext-service",
-            type: "request",
-            id: id,
-            method: "detectLanguage",
-            args: [text]
-        };
-
-        if (isFasttextReady && frame.contentWindow) {
-            frame.contentWindow.postMessage(request, '*');
-        } else {
-            fasttextQueue.push(request);
-        }
-            
-        timeoutId = setTimeout(() => {
-            if (fasttextPending[id]) {
-                delete fasttextPending[id];
-                reject(new Error("FastText timeout"));
+        chrome.i18n.detectLanguage(text, (result) => {
+            if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+                return;
             }
-        }, 5000);
+            if (result && result.languages && result.languages.length > 0) {
+                // Return the language code with the highest percentage
+                resolve(result.languages[0].language);
+            } else {
+                reject(new Error("Language could not be detected"));
+            }
+        });
     });
 }
-

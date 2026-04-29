@@ -31,6 +31,7 @@
         "https://*/*"
       ],
       "js": [
+        "Readability.js",
         "content.js"
       ]
     }
@@ -41,7 +42,7 @@
     "128": "icons/icon-128.png"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; frame-src https://assets.lsdsoftware.com https://ttstool.com"
+    "extension_pages": "script-src 'self'; object-src 'self';"
   },
   "commands": {
     "play_stop": {
