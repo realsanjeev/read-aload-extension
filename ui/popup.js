@@ -46,16 +46,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadSettings();
   setupVoiceSelection();
 
+  const [currentTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
   // 1. Check if background already has a state (playback in progress)
   chrome.runtime.sendMessage({ type: 'CMD_GET_STATE' }, async (response) => {
-    if (response && response.state && response.state.sentences.length > 0) {
+    const isDifferentTab = response && response.state && response.state.tabId && response.state.tabId !== currentTab.id;
+    const wasPlaying = response && response.state && response.state.isPlaying;
+
+    if (response && response.state && response.state.sentences.length > 0 && !isDifferentTab) {
       handleUpdateUI(response.state);
     } else {
       // 2. Fresh start: extract content
       try {
-        const text = await getPageContent();
+        const text = await getPageContent(currentTab);
         if (text) {
-          sendCommand('CMD_INIT', { text, index: 0, settings: uiState.settings });
+          const autoPlay = isDifferentTab && wasPlaying;
+          sendCommand('CMD_INIT', { text, index: 0, settings: uiState.settings, tabId: currentTab.id, autoPlay });
         } else {
           textContent.innerHTML = '<p class="placeholder-text">No readable text found.</p>';
         }
@@ -140,8 +146,7 @@ function togglePlayIcon(active) {
 
 // --- Content Extraction ---
 
-async function getPageContent() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+async function getPageContent(tab) {
   if (!tab || !tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('about:')) return null;
 
   // Handle PDF redirection

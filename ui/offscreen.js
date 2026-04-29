@@ -6,6 +6,7 @@ let playerState = {
     currentIndex: 0,
     isPlaying: false,
     isPaused: false,
+    tabId: null,
     settings: {
         voiceName: null,
         rate: 1.0,
@@ -34,7 +35,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     switch (msg.type) {
         case 'CMD_INIT':
             console.log("Offscreen: CMD_INIT received, text length:", msg.text ? msg.text.length : 0);
-            initPlayer(msg.text, msg.index || 0, msg.settings, false);
+            initPlayer(msg.text, msg.index || 0, msg.settings, msg.autoPlay || false, msg.tabId);
             sendResponse({ status: 'ok' });
             break;
         case 'CMD_PLAY':
@@ -89,8 +90,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
  * Initializes the player with new text.
  * Standardizes splitting to provide both sentences and visual breaks to the UI.
  */
-function initPlayer(text, startIndex, settings = null, autoPlay = false) {
+function initPlayer(text, startIndex, settings = null, autoPlay = false, tabId = null) {
     window.speechSynthesis.cancel();
+    
+    if (tabId !== null) {
+        playerState.tabId = tabId;
+    }
     
     if (settings) {
         playerState.settings = { ...playerState.settings, ...settings };
@@ -277,7 +282,8 @@ function sendUpdate(sendResponse = null) {
         currentIndex: playerState.currentIndex,
         totalSentences: playerState.sentences.length,
         sentences: playerState.sentences,
-        lineBreaks: playerState.lineBreaks
+        lineBreaks: playerState.lineBreaks,
+        tabId: playerState.tabId
     };
 
     if (sendResponse) {
