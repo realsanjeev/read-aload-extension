@@ -19,10 +19,14 @@ let errorRetryCount = 0;
 
 // Settings are initialized via CMD_INIT and CMD_UPDATE_SETTINGS messages from the popup
 
-// Listen for messages
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'PING') {
         sendResponse({ type: 'PONG' });
+        return;
+    }
+
+    // Ignore direct broadcasts from the popup; only accept commands proxied by the background service worker
+    if (msg.type && msg.type.startsWith('CMD_') && !msg._forwarded) {
         return;
     }
 
@@ -139,22 +143,15 @@ function updateSettings(newSettings) {
 function play() {
     if (playerState.sentences.length === 0) return;
     
-    if (playerState.isPaused) {
-        playerState.isPlaying = true;
-        playerState.isPaused = false;
-        window.speechSynthesis.resume();
-        sendUpdate();
-    } else {
-        playerState.isPlaying = true;
-        playerState.isPaused = false;
-        speakCurrentSentence();
-    }
+    playerState.isPlaying = true;
+    playerState.isPaused = false;
+    speakCurrentSentence();
 }
 
 function pause() {
     playerState.isPlaying = false;
     playerState.isPaused = true;
-    window.speechSynthesis.pause();
+    window.speechSynthesis.cancel();
     sendUpdate();
 }
 
