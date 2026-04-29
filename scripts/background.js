@@ -2,7 +2,7 @@
 
 let offscreenCreated = false;
 let offscreenCreating = null;
-const OFFSCREEN_DOCUMENT_PATH = chrome.runtime.getURL('offscreen.html');
+const OFFSCREEN_DOCUMENT_PATH = chrome.runtime.getURL('ui/offscreen.html');
 
 /**
  * Ensures the offscreen document is created and ready to receive messages.

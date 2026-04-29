@@ -146,7 +146,7 @@ async function getPageContent() {
 
   // Handle PDF redirection
   if (tab.url.toLowerCase().endsWith('.pdf')) {
-    const viewerUrl = chrome.runtime.getURL('pdf-viewer.html') + '?url=' + encodeURIComponent(tab.url);
+    const viewerUrl = chrome.runtime.getURL('ui/pdf-viewer.html') + '?url=' + encodeURIComponent(tab.url);
     chrome.tabs.create({ url: viewerUrl });
     return null;
   }
@@ -167,7 +167,7 @@ async function getPageContent() {
     try {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        files: ['Readability.js', 'content.js']
+        files: ['lib/Readability.js', 'scripts/content.js']
       });
       await new Promise(r => setTimeout(r, 200)); // Wait for script init
       response = await trySendMessage();

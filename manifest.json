@@ -14,15 +14,15 @@
     "https://*/*"
   ],
   "action": {
-    "default_popup": "popup.html",
+    "default_popup": "ui/popup.html",
     "default_icon": {
-      "16": "icons/icon-16.png",
-      "48": "icons/icon-48.png",
-      "128": "icons/icon-128.png"
+      "16": "assets/icons/icon-16.png",
+      "48": "assets/icons/icon-48.png",
+      "128": "assets/icons/icon-128.png"
     }
   },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "scripts/background.js"
   },
   "content_scripts": [
     {
@@ -31,15 +31,15 @@
         "https://*/*"
       ],
       "js": [
-        "Readability.js",
-        "content.js"
+        "lib/Readability.js",
+        "scripts/content.js"
       ]
     }
   ],
   "icons": {
-    "16": "icons/icon-16.png",
-    "48": "icons/icon-48.png",
-    "128": "icons/icon-128.png"
+    "16": "assets/icons/icon-16.png",
+    "48": "assets/icons/icon-48.png",
+    "128": "assets/icons/icon-128.png"
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self';"

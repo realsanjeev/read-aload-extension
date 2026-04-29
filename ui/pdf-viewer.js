@@ -1,7 +1,7 @@
 // pdf-viewer.js
 
 document.addEventListener("DOMContentLoaded", async () => {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '../lib/pdf.worker.min.js';
 
     const query = new URLSearchParams(location.search);
     const pdfUrl = query.get("url");
