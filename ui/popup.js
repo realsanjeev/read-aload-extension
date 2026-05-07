@@ -1,4 +1,5 @@
 // popup.js - UI Controller for Speak Aloud Extension
+import { hashStr } from './utils.js';
 
 // --- DOM Elements ---
 const btnPlay = document.getElementById('btnPlay');
@@ -204,7 +205,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'UPDATE_UI') {
-    console.log("Popup: Received UPDATE_UI, sentences:", msg.state.sentences.length);
+    console.log("Popup: Received UPDATE_UI, sentences:", msg.state.sentences ? msg.state.sentences.length : '(optimized)');
     handleUpdateUI(msg.state);
     return false;
   }
@@ -309,7 +310,7 @@ function highlightWord(boundary) {
 }
 
 function updateProgress() {
-  if (uiState.sentences.length === 0) return;
+  if (!uiState.sentences || uiState.sentences.length === 0) return;
   const progress = ((uiState.currentIndex + 1) / uiState.sentences.length) * 100;
   progressBar.style.width = `${Math.min(progress, 100)}%`;
 }
@@ -326,14 +327,6 @@ function togglePlayIcon(active) {
 
 // --- Resume Position ---
 
-function hashStr(s) {
-  let hash = 0;
-  for (let i = 0; i < s.length; i++) {
-    hash = ((hash << 5) - hash) + s.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
-}
 
 async function getSavedPosition(url) {
   if (!url) return null;
@@ -522,8 +515,7 @@ btnPlay.onclick = () => {
     setTimeout(() => textContent.classList.remove('shake'), 400);
     return;
   }
-  if (uiState.isPlaying && !uiState.isPaused) sendCommand('CMD_PAUSE');
-  else sendCommand('CMD_PLAY');
+  sendCommand('CMD_TOGGLE_PLAY');
 };
 
 btnStop.onclick = () => {
@@ -545,6 +537,7 @@ rateRange.oninput = (e) => {
 };
 
 rateRange.onchange = (e) => {
+  saveSettings();
   sendSettings();
 };
 
@@ -555,6 +548,7 @@ pitchRange.oninput = (e) => {
 };
 
 pitchRange.onchange = (e) => {
+  saveSettings();
   sendSettings();
 };
 
@@ -565,6 +559,7 @@ volumeRange.oninput = (e) => {
 };
 
 volumeRange.onchange = (e) => {
+  saveSettings();
   sendSettings();
 };
 
@@ -609,7 +604,7 @@ btnTheme.onclick = () => {
 
 btnTestVoice.onclick = () => sendCommand('CMD_TEST');
 
-btnReset.onclick = () => {
+btnReset.onclick = async () => {
   uiState.settings = {
     voiceName: null,
     rate: 1.0,
@@ -620,8 +615,8 @@ btnReset.onclick = () => {
     theme: 'auto',
     miniPlayer: true
   };
-  loadSettings();
+  await saveSettings();     // Persist defaults to storage first
+  await loadSettings();     // Reload UI from the freshly saved defaults
   applyTheme(uiState.settings.theme);
-  saveSettings();
   sendSettings();
 };

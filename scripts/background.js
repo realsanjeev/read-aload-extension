@@ -76,7 +76,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     // Forward player commands to offscreen
-    if (msg.type && (msg.type.startsWith('CMD_') || msg.type === 'CMD_GET_STATE')) {
+    if (msg.type && msg.type.startsWith('CMD_')) {
         if (msg._forwarded) return; // Prevent infinite recursion
 
         console.log("Background: Forwarding command to offscreen:", msg.type);

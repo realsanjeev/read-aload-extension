@@ -1,4 +1,5 @@
 // pdf-viewer.js - PDF Viewer with integrated TTS controls
+import { hashStr } from './utils.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('lib/pdf.worker.min.js');
 
@@ -144,15 +145,14 @@ async function extractPdfText(url) {
   const loadingTask = pdfjsLib.getDocument(url);
   const pdf = await loadingTask.promise;
   let fullText = "";
-  let pageBreaks = 0;
 
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
-    const textContent = await page.getTextContent();
+    const pageContent = await page.getTextContent();
     let lastY = -1;
     let pageText = "";
 
-    for (const item of textContent.items) {
+    for (const item of pageContent.items) {
       if (lastY !== item.transform[5] && pageText.length > 0) {
         pageText += "\n";
       }
@@ -295,14 +295,6 @@ function togglePlayIcon(active) {
 
 // --- Resume Position ---
 
-function hashStr(s) {
-  let hash = 0;
-  for (let i = 0; i < s.length; i++) {
-    hash = ((hash << 5) - hash) + s.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
-}
 
 async function getSavedPosition(url) {
   if (!url) return null;
@@ -407,6 +399,7 @@ rateRange.oninput = (e) => {
 };
 
 rateRange.onchange = (e) => {
+  saveSettings();
   sendSettings();
 };
 
@@ -417,6 +410,7 @@ pitchRange.oninput = (e) => {
 };
 
 pitchRange.onchange = (e) => {
+  saveSettings();
   sendSettings();
 };
 
@@ -427,6 +421,7 @@ volumeRange.oninput = (e) => {
 };
 
 volumeRange.onchange = (e) => {
+  saveSettings();
   sendSettings();
 };
 
@@ -462,7 +457,7 @@ btnTheme.onclick = () => {
 
 btnTestVoice.onclick = () => sendCommand('CMD_TEST');
 
-btnReset.onclick = () => {
+btnReset.onclick = async () => {
   uiState.settings = {
     voiceName: null,
     rate: 1.0,
@@ -472,8 +467,8 @@ btnReset.onclick = () => {
     autoScroll: true,
     theme: 'auto'
   };
-  loadSettings();
+  await saveSettings();     // Persist defaults to storage first
+  await loadSettings();     // Reload UI from the freshly saved defaults
   applyTheme(uiState.settings.theme);
-  saveSettings();
   sendSettings();
 };

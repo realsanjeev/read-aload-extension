@@ -1,4 +1,5 @@
 // offscreen.js - Text-to-Speech Engine
+import { hashStr } from './utils.js';
 
 let playerState = {
     sentences: [],
@@ -25,11 +26,6 @@ let isSpeaking = false;
 // Settings are initialized via CMD_INIT and CMD_UPDATE_SETTINGS messages from the popup
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg.type === 'PING') {
-        sendResponse({ type: 'PONG' });
-        return;
-    }
-
     // Ignore direct broadcasts from the popup; only accept commands proxied by the background service worker
     if (msg.type && msg.type.startsWith('CMD_') && !msg._forwarded) {
         return;
@@ -224,9 +220,8 @@ function initPlayer(text, startIndex, settings = null, autoPlay = false, tabId =
 function updateSettings(newSettings) {
     const oldRate = playerState.settings.rate;
     const oldVoice = playerState.settings.voiceName;
-    const oldHighlight = playerState.settings.highlightMode;
     playerState.settings = { ...playerState.settings, ...newSettings };
-    
+
     if (playerState.isPlaying && !playerState.isPaused) {
         if (oldRate !== playerState.settings.rate || oldVoice !== playerState.settings.voiceName) {
             speakCurrentSentence();
@@ -259,7 +254,9 @@ function togglePlay() {
 }
 
 function togglePause() {
-    togglePlay();
+    if (playerState.isPlaying && !playerState.isPaused) {
+        pause();
+    }
 }
 
 function stop() {
@@ -287,14 +284,7 @@ function prev() {
     }
 }
 
-function jump(index) {
-    playerState.currentIndex = index;
-    if (playerState.sentences.length > 0) {
-        playerState.isPlaying = true;
-        playerState.isPaused = false;
-        speakCurrentSentence();
-    }
-}
+// Note: CMD_JUMP is handled via initPlayer(null, msg.index, null, true) in the message handler.
 
 function nextParagraph() {
     if (playerState.lineBreaks.length === 0) {
@@ -470,14 +460,6 @@ function sendUpdate(sendResponse = null, extra = {}) {
     }
 }
 
-function hashStr(s) {
-    let hash = 0;
-    for (let i = 0; i < s.length; i++) {
-        hash = ((hash << 5) - hash) + s.charCodeAt(i);
-        hash |= 0;
-    }
-    return Math.abs(hash).toString(36);
-}
 
 function savePosition() {
     if (!playerState.tabId || playerState.sentences.length === 0) return;

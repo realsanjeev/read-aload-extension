@@ -5,8 +5,6 @@ console.log("[ReadAloud] Content script loaded.");
 let miniPlayer = null;
 let miniPlayerVisible = false;
 let currentSentenceText = "";
-let currentProgress = 0;
-let currentIsPlaying = false;
 
 // Listen for messages from the popup / background / offscreen
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -26,8 +24,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (state) {
             updateMiniPlayer(state);
         }
-        sendResponse({ received: true });
-        return false;
+        return;
     }
 
     if (msg.type === 'TOGGLE_MINI_PLAYER') {
@@ -36,8 +33,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         } else {
             hideMiniPlayer();
         }
-        sendResponse({ received: true });
-        return false;
+        return;
     }
 });
 

@@ -27,7 +27,7 @@
     "128": "assets/icons/icon-128.png"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; wasm-unsafe-eval;"
+    "extension_pages": "script-src 'self'; object-src 'self';"
   },
   "commands": {
     "play_stop": {
