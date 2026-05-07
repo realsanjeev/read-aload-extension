@@ -100,13 +100,21 @@ function tokenizeSentences(text) {
 
     // Define abbreviations and special patterns
     const abbreviations = new Set([
+        // Titles
         'mr', 'mrs', 'ms', 'dr', 'prof', 'sr', 'jr', 'st',
-        'ave', 'blvd', 'rd', 'ln', 'ct', 'pl', 'dr',
+        // Street types
+        'ave', 'blvd', 'rd', 'ln', 'ct', 'pl',
+        // Academic / Latin
         'eg', 'ie', 'vs', 'etc', 'et al', 'fig', 'vol', 'vols',
-        'inc', 'ltd', 'jr', 'sr', 'phd', 'md', 'ba', 'ma',
+        // Credentials
+        'inc', 'ltd', 'phd', 'md', 'ba', 'ma',
+        // Time
         'a.m', 'p.m', 'am', 'pm',
+        // Geopolitical
         'u.s.a', 'u.k', 'u.s', 'e.u', 'u.n',
-        'no', 'nos', 'pp', 'vol', 'vols',
+        // Miscellaneous
+        'no', 'nos', 'pp',
+        // Months
         'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec'
     ]);
 
@@ -159,7 +167,6 @@ function tokenizeSentences(text) {
                 // Check if there's more text and it looks like a sentence continuation (lowercase next word)
                 const remainder = trimmedLine.substring(i + 1).trim();
                 const nextWord = remainder.match(/^([a-zA-Z0-9]+)/);
-                const nextWordLower = nextWord ? nextWord[1].toLowerCase() : '';
                 const startsWithLowercase = nextWord && /^[a-z]/.test(nextWord[1]);
 
                 // Decision: split here unless it's a decimal, abbreviation, or starts with lowercase

@@ -166,6 +166,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 1. Check if background already has a state (playback in progress)
   chrome.runtime.sendMessage({ type: 'CMD_GET_STATE' }, async (response) => {
+    if (chrome.runtime.lastError) { /* Offscreen not running yet — normal on fresh start */ }
     const isDifferentTab = response && response.state && response.state.tabId && response.state.tabId !== currentTab.id;
     const wasPlaying = response && response.state && response.state.isPlaying;
 
@@ -219,7 +220,10 @@ function sendCommand(type, payload = {}) {
 function handleUpdateUI(state) {
   // If sentences are missing (optimized payload), don't overwrite our current list
   const hasSentences = state.sentences && state.sentences.length > 0;
-  const needsRerender = hasSentences && uiState.sentences.length !== state.sentences.length;
+  const needsRerender = hasSentences && (
+    uiState.sentences.length !== state.sentences.length ||
+    uiState.sentences[0] !== state.sentences[0]
+  );
   
   if (hasSentences) {
     uiState.sentences = state.sentences;

@@ -82,7 +82,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         console.log("Background: Forwarding command to offscreen:", msg.type);
         ensureOffscreen().then(() => {
             const expectsResponse = ['CMD_GET_STATE', 'CMD_DETECT_LANG'].includes(msg.type);
-            
+
             if (expectsResponse) {
                 chrome.runtime.sendMessage({ ...msg, _forwarded: true }, (response) => {
                     if (chrome.runtime.lastError) {
@@ -101,6 +101,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 // Give it a moment to send the STOP update to UI, then close
                 setTimeout(closeOffscreen, 500);
             }
+        }).catch(err => {
+            console.error("Background: Failed to ensure offscreen:", err);
+            sendResponse({ status: 'error', message: err.message });
         });
         return true;
     }

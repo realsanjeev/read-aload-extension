@@ -183,7 +183,10 @@ function sendCommand(type, payload = {}) {
 
 function handleUpdateUI(state) {
   const hasSentences = state.sentences && state.sentences.length > 0;
-  const needsRerender = hasSentences && uiState.sentences.length !== state.sentences.length;
+  const needsRerender = hasSentences && (
+    uiState.sentences.length !== state.sentences.length ||
+    uiState.sentences[0] !== state.sentences[0]
+  );
 
   if (hasSentences) {
     uiState.sentences = state.sentences;
