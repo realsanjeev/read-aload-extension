@@ -4,8 +4,11 @@ A premium Text-to-Speech (TTS) Chrome Extension that automatically detects and r
 
 ## Key Features
 
-- **🧠 Intelligent Extraction**: Automatically detects the main article text on a page, filtering out ads and menus.
+- **🧠 Intelligent Extraction**: Uses Mozilla's Readability.js engine to perfectly extract the main article text, completely ignoring ads, menus, and sidebars.
 - **🎤 Real-Time Highlighting**: Highlights the current sentence in yellow as it is spoken (Karaoke mode).
+- **🔄 Seamless Transition**: Clicking the extension icon on a new tab while reading another will automatically stop the old tab and instantly start reading the new one!
+- **📄 Local PDF Support**: Built-in PDF reader that extracts text locally, keeping your documents secure.
+- **🔒 Privacy First**: All text extraction, language detection, and TTS are done completely offline in your browser. No data is sent to external servers.
 - **🎛️ Complete Control**: Play, Pause, Stop, and skip sentences (Next/Previous).
 - **🎨 Premium UI**: A clean, modern interface with a "Reader View".
 - **⚙️ Customization**:
@@ -28,6 +31,7 @@ A premium Text-to-Speech (TTS) Chrome Extension that automatically detects and r
 2.  Values the **Read Aloud** extension icon.
 3.  The extension will auto-extract the text and display it.
 4.  Click **Play** to start reading.
+    - If you are already reading a page and click the extension on a *new* page, it will automatically start reading the new page!
     - Click **Next/Prev** to jump sentences.
     - Click **Settings** (gear icon) to change voice/speed.
     - Click any sentence in the text view to jump directly to it.
@@ -40,10 +44,10 @@ A premium Text-to-Speech (TTS) Chrome Extension that automatically detects and r
 
 
 ## Commands
-- <kdb>Alt</kdb> + <kdb>O</kdb>: Play/Stop the audio
-- <kdb>Alt</kdb> + <kdb>P</kdb>: Pause/resume the audio
-- <kdb>Alt</kdb> + <kdb>.</kdb>: Next Sentence
-- <kdb>Alt</kdb> + <kdb>,</kdb>: Previous sentence
+- <kbd>Alt</kbd> + <kbd>O</kbd>: Play/Stop the audio
+- <kbd>Alt</kbd> + <kbd>P</kbd>: Pause/resume the audio
+- <kbd>Alt</kbd> + <kbd>.</kbd>: Next Sentence
+- <kbd>Alt</kbd> + <kbd>,</kbd>: Previous sentence
 ### References:
 - Icon based on: [Flaticon Megaphone](https://www.flaticon.com/free-icon/megaphone_9018879)
 - [Chrome Extension Manifest - Developer Docs](https://developer.chrome.com/docs/extensions/reference/manifest)

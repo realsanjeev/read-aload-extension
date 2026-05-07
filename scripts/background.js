@@ -1,32 +1,34 @@
 // background.js - Orchestrator for Speak Aloud Extension
 
-let offscreenCreated = false;
 let offscreenCreating = null;
-const OFFSCREEN_DOCUMENT_PATH = chrome.runtime.getURL('offscreen.html');
+let offscreenClosePromise = null;
+let offscreenClosing = false;
+const OFFSCREEN_DOCUMENT_PATH = chrome.runtime.getURL('ui/offscreen.html');
 
 /**
  * Ensures the offscreen document is created and ready to receive messages.
  */
 async function ensureOffscreen() {
-    if (offscreenCreated) return;
+    if (offscreenClosing) {
+        await offscreenClosePromise;
+    }
+    
     if (offscreenCreating) return offscreenCreating;
+
+    const existingContexts = await chrome.runtime.getContexts({
+        contextTypes: ['OFFSCREEN_DOCUMENT'],
+        documentUrls: [OFFSCREEN_DOCUMENT_PATH]
+    });
+
+    if (existingContexts.length > 0) return;
 
     offscreenCreating = (async () => {
         try {
-            const existingContexts = await chrome.runtime.getContexts({
-                contextTypes: ['OFFSCREEN_DOCUMENT'],
-                documentUrls: [OFFSCREEN_DOCUMENT_PATH]
+            await chrome.offscreen.createDocument({
+                url: OFFSCREEN_DOCUMENT_PATH,
+                reasons: ['AUDIO_PLAYBACK'],
+                justification: 'Text-to-Speech playback',
             });
-
-            if (existingContexts.length === 0) {
-                await chrome.offscreen.createDocument({
-                    url: OFFSCREEN_DOCUMENT_PATH,
-                    reasons: ['AUDIO_PLAYBACK'],
-                    justification: 'Text-to-Speech playback',
-                });
-            }
-
-            offscreenCreated = true;
         } finally {
             offscreenCreating = null;
         }
@@ -35,7 +37,27 @@ async function ensureOffscreen() {
     return offscreenCreating;
 }
 
-// Removed waitForOffscreenReady as createDocument ensures readiness
+async function closeOffscreen() {
+    if (offscreenClosing) return;
+    offscreenClosing = true;
+    offscreenClosePromise = (async () => {
+        try {
+            const existingContexts = await chrome.runtime.getContexts({
+                contextTypes: ['OFFSCREEN_DOCUMENT'],
+                documentUrls: [OFFSCREEN_DOCUMENT_PATH]
+            });
+            if (existingContexts.length > 0) {
+                await chrome.offscreen.closeDocument();
+            }
+        } catch (e) {
+            console.warn("Failed to close offscreen:", e);
+        } finally {
+            offscreenClosing = false;
+            offscreenClosePromise = null;
+        }
+    })();
+    return offscreenClosePromise;
+}
 
 // Proxy messages to offscreen
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -54,7 +76,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     // Forward player commands to offscreen
-    if (msg.type && (msg.type.startsWith('CMD_') || msg.type === 'CMD_GET_STATE')) {
+    if (msg.type && msg.type.startsWith('CMD_')) {
         if (msg._forwarded) return; // Prevent infinite recursion
 
         console.log("Background: Forwarding command to offscreen:", msg.type);
@@ -73,6 +95,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             } else {
                 chrome.runtime.sendMessage({ ...msg, _forwarded: true });
                 sendResponse({ status: 'ok' });
+            }
+
+            if (msg.type === 'CMD_STOP') {
+                // Give it a moment to send the STOP update to UI, then close
+                setTimeout(closeOffscreen, 500);
             }
         });
         return true;
@@ -96,3 +123,6 @@ chrome.commands.onCommand.addListener(async (command) => {
         console.error("Keyboard command failed:", e);
     }
 });
+
+// Clean up offscreen when extension is suspended or updated
+chrome.runtime.onSuspend.addListener(closeOffscreen);
