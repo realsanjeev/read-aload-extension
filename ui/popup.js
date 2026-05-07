@@ -166,6 +166,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 1. Check if background already has a state (playback in progress)
   chrome.runtime.sendMessage({ type: 'CMD_GET_STATE' }, async (response) => {
+    if (chrome.runtime.lastError) { /* Offscreen not running yet — normal on fresh start */ }
     const isDifferentTab = response && response.state && response.state.tabId && response.state.tabId !== currentTab.id;
     const wasPlaying = response && response.state && response.state.isPlaying;
 
@@ -184,10 +185,10 @@ document.addEventListener('DOMContentLoaded', async () => {
           await autoSelectVoice(text);
           const saved = await getSavedPosition(currentTab.url);
           if (saved && saved.index > 0) {
-            showResumePrompt(saved.index, text, currentTab.id);
+            showResumePrompt(saved.index, text, currentTab.id, currentTab.url);
           } else {
             const autoPlay = isDifferentTab && wasPlaying;
-            sendCommand('CMD_INIT', { text, index: 0, settings: uiState.settings, tabId: currentTab.id, autoPlay });
+            sendCommand('CMD_INIT', { text, index: 0, settings: uiState.settings, tabId: currentTab.id, tabUrl: currentTab.url, autoPlay });
           }
           if (uiState.settings.miniPlayer) updateMiniPlayer(true);
         } else {
@@ -219,7 +220,10 @@ function sendCommand(type, payload = {}) {
 function handleUpdateUI(state) {
   // If sentences are missing (optimized payload), don't overwrite our current list
   const hasSentences = state.sentences && state.sentences.length > 0;
-  const needsRerender = hasSentences && uiState.sentences.length !== state.sentences.length;
+  const needsRerender = hasSentences && (
+    uiState.sentences.length !== state.sentences.length ||
+    uiState.sentences[0] !== state.sentences[0]
+  );
   
   if (hasSentences) {
     uiState.sentences = state.sentences;
@@ -335,15 +339,15 @@ async function getSavedPosition(url) {
   return data[key] || null;
 }
 
-function showResumePrompt(savedIndex, text, tabId) {
+function showResumePrompt(savedIndex, text, tabId, tabUrl) {
   resumePrompt.classList.remove('hidden');
   btnResumeYes.onclick = () => {
     resumePrompt.classList.add('hidden');
-    sendCommand('CMD_INIT', { text, index: savedIndex, settings: uiState.settings, tabId });
+    sendCommand('CMD_INIT', { text, index: savedIndex, settings: uiState.settings, tabId, tabUrl });
   };
   btnResumeNo.onclick = () => {
     resumePrompt.classList.add('hidden');
-    sendCommand('CMD_INIT', { text, index: 0, settings: uiState.settings, tabId });
+    sendCommand('CMD_INIT', { text, index: 0, settings: uiState.settings, tabId, tabUrl });
   };
 }
 
