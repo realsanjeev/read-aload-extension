@@ -2,16 +2,13 @@
   "manifest_version": 3,
   "name": "Read Aloud Extension",
   "version": "1.2",
+  "minimum_chrome_version": "109",
   "description": "A Text-to-Speech extension that reads web pages aloud.",
   "permissions": [
     "activeTab",
     "scripting",
     "storage",
     "offscreen"
-  ],
-  "host_permissions": [
-    "http://*/*",
-    "https://*/*"
   ],
   "action": {
     "default_popup": "ui/popup.html",
@@ -24,18 +21,6 @@
   "background": {
     "service_worker": "scripts/background.js"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "http://*/*",
-        "https://*/*"
-      ],
-      "js": [
-        "lib/Readability.js",
-        "scripts/content.js"
-      ]
-    }
-  ],
   "icons": {
     "16": "assets/icons/icon-16.png",
     "48": "assets/icons/icon-48.png",

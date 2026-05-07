@@ -58,6 +58,7 @@ let voices = [];
 let contentReady = false;
 let voiceRetryCount = 0;
 const MAX_VOICE_RETRIES = 20;
+const scriptInjectedTabs = new Set();
 
 // --- Utilities ---
 function debounce(fn, delay) {
@@ -135,12 +136,22 @@ async function autoSelectVoice(text) {
 }
 
 // --- Mini-Player Toggle ---
-function updateMiniPlayer(show) {
-  chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
-    if (tab && tab.id) {
-      chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_MINI_PLAYER', visible: show });
+async function updateMiniPlayer(show) {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab || !tab.id) return;
+
+  if (show) {
+    try {
+      await chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_MINI_PLAYER', visible: true });
+    } catch (e) {
+      await injectContentScripts(tab.id);
+      chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_MINI_PLAYER', visible: true })
+        .catch(() => {});
     }
-  }).catch(() => {});
+  } else {
+    chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_MINI_PLAYER', visible: false })
+      .catch(() => {});
+  }
 }
 
 // --- Initialization ---
@@ -357,7 +368,6 @@ async function getPageContent(tab) {
     return null;
   }
 
-  // Check Content-Type for PDFs served without .pdf extension
   if (!pathname.match(/\.\w+$/)) {
     try {
       const headResp = await fetch(tab.url, { method: 'HEAD' });
@@ -367,9 +377,7 @@ async function getPageContent(tab) {
         chrome.tabs.create({ url: viewerUrl });
         return null;
       }
-    } catch (e) {
-      // HEAD request failed, proceed with normal extraction
-    }
+    } catch (e) {}
   }
 
   if (pathname.endsWith('.txt') || pathname.endsWith('.md')) {
@@ -395,6 +403,8 @@ async function getPageContent(tab) {
     }
   }
 
+  await injectContentScripts(tab.id);
+
   const trySendMessage = () => {
     return new Promise((resolve) => {
       chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_CONTENT' }, (response) => {
@@ -404,31 +414,33 @@ async function getPageContent(tab) {
     });
   };
 
-  let response = await trySendMessage();
-  
-  if (response && response.error && (response.error.includes("Could not establish connection") || response.error.includes("Receiving end does not exist"))) {
-    console.log("Popup: Content script not found, injecting...");
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ['lib/Readability.js', 'scripts/content.js']
-      });
-      let attempts = 0;
-      const maxAttempts = 10;
-      while ((!response || response.error) && attempts < maxAttempts) {
-        await new Promise(r => setTimeout(r, 200));
-        response = await trySendMessage();
-        attempts++;
-      }
-    } catch (e) {
-      console.error("Popup: Injection failed", e);
+  let response;
+  let attempts = 0;
+  const maxAttempts = 10;
+  while ((!response || response.error) && attempts < maxAttempts) {
+    response = await trySendMessage();
+    if (!response || response.error) {
+      await new Promise(r => setTimeout(r, 200));
     }
+    attempts++;
   }
 
   if (response && response.result) {
     return response.result;
-  } else {
-    throw new Error(response ? response.error || "Extraction failed." : "Extraction failed.");
+  }
+  throw new Error(response ? response.error || "Extraction failed." : "Extraction failed.");
+}
+
+async function injectContentScripts(tabId) {
+  if (scriptInjectedTabs.has(tabId)) return;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['lib/Readability.js', 'scripts/content.js']
+    });
+    scriptInjectedTabs.add(tabId);
+  } catch (e) {
+    console.error("Script injection failed:", e);
   }
 }
 
