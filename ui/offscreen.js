@@ -3,11 +3,12 @@ import { hashStr } from './utils.js';
 
 let playerState = {
     sentences: [],
-    lineBreaks: [], // Indices in sentences array where a paragraph break should occur
+    lineBreaks: [],
     currentIndex: 0,
     isPlaying: false,
     isPaused: false,
     tabId: null,
+    tabUrl: null,  // stored at CMD_INIT so savePosition() doesn't need chrome.tabs (unavailable in offscreen)
     settings: {
         voiceName: null,
         rate: 1.0,
@@ -34,7 +35,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     switch (msg.type) {
         case 'CMD_INIT':
             console.log("Offscreen: CMD_INIT received, text length:", msg.text ? msg.text.length : 0);
-            initPlayer(msg.text, msg.index || 0, msg.settings, msg.autoPlay || false, msg.tabId);
+            initPlayer(msg.text, msg.index || 0, msg.settings, msg.autoPlay || false, msg.tabId, msg.tabUrl || null);
             sendResponse({ status: 'ok' });
             break;
         case 'CMD_PLAY':
@@ -194,13 +195,16 @@ function tokenizeSentences(text) {
 /**
  * Initializes the player with new text.
  */
-function initPlayer(text, startIndex, settings = null, autoPlay = false, tabId = null) {
+function initPlayer(text, startIndex, settings = null, autoPlay = false, tabId = null, tabUrl = null) {
     window.speechSynthesis.cancel();
-    
+
     if (tabId !== null) {
         playerState.tabId = tabId;
     }
-    
+    if (tabUrl !== null) {
+        playerState.tabUrl = tabUrl;
+    }
+
     if (settings) {
         playerState.settings = { ...playerState.settings, ...settings };
     }
@@ -469,19 +473,15 @@ function sendUpdate(sendResponse = null, extra = {}) {
 
 
 function savePosition() {
-    if (!playerState.tabId || playerState.sentences.length === 0) return;
-    chrome.tabs.get(playerState.tabId).then(tab => {
-        if (tab && tab.url) {
-            const key = 'pos_' + hashStr(tab.url);
-            chrome.storage.local.set({
-                [key]: {
-                    url: tab.url,
-                    index: playerState.currentIndex,
-                    timestamp: Date.now()
-                }
-            });
+    if (!playerState.tabUrl || playerState.sentences.length === 0) return;
+    const key = 'pos_' + hashStr(playerState.tabUrl);
+    chrome.storage.local.set({
+        [key]: {
+            url: playerState.tabUrl,
+            index: playerState.currentIndex,
+            timestamp: Date.now()
         }
-    }).catch(() => {});
+    });
 }
 
 let testVoiceRetryCount = 0;

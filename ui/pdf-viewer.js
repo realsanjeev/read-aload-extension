@@ -130,7 +130,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       contentReady = true;
       const saved = await getSavedPosition(pdfUrl);
       const index = saved && saved.index > 0 ? saved.index : 0;
-      sendCommand('CMD_INIT', { text, index, settings: uiState.settings });
+      sendCommand('CMD_INIT', { text, index, settings: uiState.settings, tabUrl: pdfUrl });
       updatePlayButtonState();
     } else {
       textContent.innerHTML = '<p class="placeholder-text">No text found in PDF.</p>';
