@@ -11,12 +11,16 @@ let playerState = {
         voiceName: null,
         rate: 1.0,
         pitch: 1.0,
-        volume: 1.0
+        volume: 1.0,
+        highlightMode: 'sentence', // 'sentence' | 'word'
     },
     utterance: null
 };
 
 let errorRetryCount = 0;
+let voiceRetryCount = 0;
+const MAX_VOICE_RETRIES = 20;
+let isSpeaking = false;
 
 // Settings are initialized via CMD_INIT and CMD_UPDATE_SETTINGS messages from the popup
 
@@ -31,7 +35,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
     }
 
-    let isAsync = false;
     switch (msg.type) {
         case 'CMD_INIT':
             console.log("Offscreen: CMD_INIT received, text length:", msg.text ? msg.text.length : 0);
@@ -62,6 +65,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             prev();
             sendResponse({ status: 'ok' });
             break;
+        case 'CMD_NEXT_PARA':
+            nextParagraph();
+            sendResponse({ status: 'ok' });
+            break;
+        case 'CMD_PREV_PARA':
+            prevParagraph();
+            sendResponse({ status: 'ok' });
+            break;
         case 'CMD_JUMP':
             initPlayer(null, msg.index, null, true);
             sendResponse({ status: 'ok' });
@@ -78,17 +89,107 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             detectLanguage(msg.text)
                 .then(lang => sendResponse({ lang }))
                 .catch(err => sendResponse({ error: err.message }));
-            break;
+            return true;
         case 'CMD_GET_STATE':
             sendUpdate(sendResponse);
-            break;
+            return true;
     }
-    return true; // Always return true to keep the message channel open
 });
 
 /**
+ * Smart sentence tokenizer that handles abbreviations, decimals, and ellipsis.
+ */
+function tokenizeSentences(text) {
+    if (!text || text.length === 0) return [];
+
+    // Define abbreviations and special patterns
+    const abbreviations = new Set([
+        'mr', 'mrs', 'ms', 'dr', 'prof', 'sr', 'jr', 'st',
+        'ave', 'blvd', 'rd', 'ln', 'ct', 'pl', 'dr',
+        'eg', 'ie', 'vs', 'etc', 'et al', 'fig', 'vol', 'vols',
+        'inc', 'ltd', 'jr', 'sr', 'phd', 'md', 'ba', 'ma',
+        'a.m', 'p.m', 'am', 'pm',
+        'u.s.a', 'u.k', 'u.s', 'e.u', 'u.n',
+        'no', 'nos', 'pp', 'vol', 'vols',
+        'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec'
+    ]);
+
+    // Split by line first to preserve paragraph structure
+    const lines = text.split(/\n+/);
+    const sentences = [];
+    const lineBreaks = [];
+
+    lines.forEach(line => {
+        const trimmedLine = line.trim();
+        if (trimmedLine.length === 0) return;
+
+        if (sentences.length > 0) {
+            lineBreaks.push(sentences.length);
+        }
+
+        // Split by sentence endings, but be smart about abbreviations
+        const result = [];
+        let current = '';
+        let i = 0;
+
+        while (i < trimmedLine.length) {
+            current += trimmedLine[i];
+
+            if (trimmedLine[i] === '.' || trimmedLine[i] === '!' || trimmedLine[i] === '?') {
+                // Check if this is an ellipsis (...)
+                if (trimmedLine.substring(i, i + 3) === '...') {
+                    current += trimmedLine[i + 1] || '';
+                    current += trimmedLine[i + 2] || '';
+                    i += 2;
+                }
+                // Check if next char is a quote
+                const nextChar = trimmedLine[i + 1];
+                if (nextChar === '"' || nextChar === "'") {
+                    current += nextChar;
+                    i++;
+                }
+
+                // Look back to see if this period is part of an abbreviation or number
+                const beforePeriod = current.slice(0, -1).trim();
+                const lastWordMatch = beforePeriod.match(/([a-zA-Z0-9]+)[.!?]?$/);
+                const lastWord = lastWordMatch ? lastWordMatch[1].toLowerCase() : '';
+
+                // Check if it's a decimal number (e.g., 3.14)
+                const isDecimal = /\d+\.\d+$/.test(beforePeriod);
+
+                // Check if it's an abbreviation
+                const isAbbrev = abbreviations.has(lastWord) || abbreviations.has(lastWord + '.');
+
+                // Check if there's more text and it looks like a sentence continuation (lowercase next word)
+                const remainder = trimmedLine.substring(i + 1).trim();
+                const nextWord = remainder.match(/^([a-zA-Z0-9]+)/);
+                const nextWordLower = nextWord ? nextWord[1].toLowerCase() : '';
+                const startsWithLowercase = nextWord && /^[a-z]/.test(nextWord[1]);
+
+                // Decision: split here unless it's a decimal, abbreviation, or starts with lowercase
+                if (!isDecimal && !isAbbrev && (!startsWithLowercase || trimmedLine[i] !== '.')) {
+                    result.push(current.trim());
+                    current = '';
+                }
+            }
+
+            i++;
+        }
+
+        // Add any remaining text as the last sentence
+        if (current.trim().length > 0) {
+            result.push(current.trim());
+        }
+
+        const validSentences = result.filter(s => s.length > 0);
+        sentences.push(...validSentences);
+    });
+
+    return { sentences, lineBreaks };
+}
+
+/**
  * Initializes the player with new text.
- * Standardizes splitting to provide both sentences and visual breaks to the UI.
  */
 function initPlayer(text, startIndex, settings = null, autoPlay = false, tabId = null) {
     window.speechSynthesis.cancel();
@@ -102,22 +203,9 @@ function initPlayer(text, startIndex, settings = null, autoPlay = false, tabId =
     }
 
     if (text) {
-        const lines = text.split(/\n+/);
-        playerState.sentences = [];
-        playerState.lineBreaks = [];
-
-        lines.forEach(line => {
-            const trimmedLine = line.trim();
-            if (trimmedLine.length === 0) return;
-
-            if (playerState.sentences.length > 0) {
-                playerState.lineBreaks.push(playerState.sentences.length);
-            }
-
-            const sentenceRegex = /[^.!?]+[.!?]+["']?|[^.!?]+$/g;
-            const lineSentences = trimmedLine.match(sentenceRegex) || [trimmedLine];
-            playerState.sentences.push(...lineSentences.map(s => s.trim()).filter(s => s.length > 0));
-        });
+        const tokenized = tokenizeSentences(text);
+        playerState.sentences = tokenized.sentences;
+        playerState.lineBreaks = tokenized.lineBreaks;
     }
 
     playerState.currentIndex = Math.min(startIndex, playerState.sentences.length - 1);
@@ -129,13 +217,14 @@ function initPlayer(text, startIndex, settings = null, autoPlay = false, tabId =
     if (autoPlay) {
         speakCurrentSentence();
     } else {
-        sendUpdate();
+        sendUpdate(null, { fullPayload: true });
     }
 }
 
 function updateSettings(newSettings) {
     const oldRate = playerState.settings.rate;
     const oldVoice = playerState.settings.voiceName;
+    const oldHighlight = playerState.settings.highlightMode;
     playerState.settings = { ...playerState.settings, ...newSettings };
     
     if (playerState.isPlaying && !playerState.isPaused) {
@@ -157,6 +246,7 @@ function pause() {
     playerState.isPlaying = false;
     playerState.isPaused = true;
     window.speechSynthesis.cancel();
+    savePosition();
     sendUpdate();
 }
 
@@ -177,6 +267,7 @@ function stop() {
     playerState.isPaused = false;
     playerState.currentIndex = 0;
     window.speechSynthesis.cancel();
+    savePosition();
     sendUpdate();
 }
 
@@ -205,16 +296,58 @@ function jump(index) {
     }
 }
 
+function nextParagraph() {
+    if (playerState.lineBreaks.length === 0) {
+        next();
+        return;
+    }
+    // Find the next line break after current index
+    const nextBreak = playerState.lineBreaks.find(b => b > playerState.currentIndex);
+    if (nextBreak !== undefined) {
+        playerState.currentIndex = nextBreak;
+        if (playerState.isPlaying) speakCurrentSentence();
+        else sendUpdate();
+    } else {
+        // Jump to last sentence
+        playerState.currentIndex = playerState.sentences.length - 1;
+        if (playerState.isPlaying) speakCurrentSentence();
+        else sendUpdate();
+    }
+}
+
+function prevParagraph() {
+    if (playerState.lineBreaks.length === 0) {
+        prev();
+        return;
+    }
+    // Find the last line break before or at current index
+    const prevBreaks = playerState.lineBreaks.filter(b => b < playerState.currentIndex);
+    if (prevBreaks.length > 0) {
+        playerState.currentIndex = prevBreaks[prevBreaks.length - 1];
+        if (playerState.isPlaying) speakCurrentSentence();
+        else sendUpdate();
+    } else {
+        playerState.currentIndex = 0;
+        if (playerState.isPlaying) speakCurrentSentence();
+        else sendUpdate();
+    }
+}
+
 function speakCurrentSentence() {
     if (playerState.utterance) {
         playerState.utterance.onend = null;
         playerState.utterance.onerror = null;
+        playerState.utterance.onboundary = null;
     }
+    
+    if (isSpeaking) return;
+    isSpeaking = true;
     
     window.speechSynthesis.cancel();
     
-    if (playerState.currentIndex >= playerState.sentences.length) {
+    if (playerState.sentences.length === 0 || playerState.currentIndex >= playerState.sentences.length) {
         playerState.isPlaying = false;
+        isSpeaking = false;
         sendUpdate();
         return;
     }
@@ -229,23 +362,58 @@ function speakCurrentSentence() {
 
     const voices = window.speechSynthesis.getVoices();
     if (voices.length === 0) {
-        // Voices not loaded yet, wait a bit and retry
-        console.warn("Offscreen: Voices not loaded yet, waiting...");
-        setTimeout(speakCurrentSentence, 100);
+        if (voiceRetryCount >= MAX_VOICE_RETRIES) {
+            isSpeaking = false;
+            console.error("Offscreen: Max voice retries reached, aborting speech.");
+            return;
+        }
+        console.warn("Offscreen: Voices not loaded yet, waiting for voiceschanged...");
+        const onVoicesChanged = () => {
+            window.speechSynthesis.onvoiceschanged = null;
+            voiceRetryCount = 0;
+            isSpeaking = false;
+            speakCurrentSentence();
+        };
+        window.speechSynthesis.onvoiceschanged = onVoicesChanged;
+        setTimeout(() => {
+            if (window.speechSynthesis.onvoiceschanged === onVoicesChanged) {
+                window.speechSynthesis.onvoiceschanged = null;
+                voiceRetryCount++;
+                isSpeaking = false;
+                speakCurrentSentence();
+            }
+        }, 1000);
         return;
     }
+    voiceRetryCount = 0;
 
     if (playerState.settings.voiceName) {
         const v = voices.find(voice => voice.name === playerState.settings.voiceName);
         if (v) utter.voice = v;
     }
 
+    if (playerState.settings.highlightMode === 'word') {
+        utter.onboundary = (event) => {
+            if (event.name === 'word' || event.name === 'sentence') {
+                sendUpdate(null, {
+                    wordBoundary: {
+                        charIndex: event.charIndex,
+                        charLength: event.charLength || 0,
+                        sentenceIndex: playerState.currentIndex
+                    }
+                });
+            }
+        };
+    }
+
     utter.onstart = () => {
         errorRetryCount = 0;
+        isSpeaking = false;
         sendUpdate();
     };
 
     utter.onend = () => {
+        isSpeaking = false;
         if (playerState.isPlaying && !playerState.isPaused) {
             playerState.currentIndex++;
             if (playerState.currentIndex < playerState.sentences.length) {
@@ -257,6 +425,7 @@ function speakCurrentSentence() {
     };
 
     utter.onerror = (e) => {
+        isSpeaking = false;
         if (e.error !== 'interrupted' && e.error !== 'canceled') {
             console.error("TTS Error:", e.error);
             if (playerState.isPlaying) {
@@ -270,30 +439,64 @@ function speakCurrentSentence() {
         }
     };
 
-    setTimeout(() => {
-        window.speechSynthesis.speak(utter);
-    }, 50);
+    window.speechSynthesis.speak(utter);
 }
 
-function sendUpdate(sendResponse = null) {
+function sendUpdate(sendResponse = null, extra = {}) {
     const state = {
         isPlaying: playerState.isPlaying,
         isPaused: playerState.isPaused,
         currentIndex: playerState.currentIndex,
         totalSentences: playerState.sentences.length,
-        sentences: playerState.sentences,
+        // Only send sentences if it's a direct response to a state request or specifically requested
         lineBreaks: playerState.lineBreaks,
-        tabId: playerState.tabId
+        tabId: playerState.tabId,
+        ...extra
     };
+
+    // If we're responding to CMD_GET_STATE or CMD_INIT, we MUST send sentences
+    if (sendResponse || extra.fullPayload) {
+        state.sentences = playerState.sentences;
+    }
 
     if (sendResponse) {
         sendResponse({ type: 'UPDATE_UI', state });
     } else {
         chrome.runtime.sendMessage({ type: 'UPDATE_UI', state }, () => {
-            if (chrome.runtime.lastError) { /* ignore */ }
+            if (chrome.runtime.lastError) {
+                console.debug("Offscreen: UPDATE_UI broadcast had no receivers:", chrome.runtime.lastError.message);
+            }
         });
     }
 }
+
+function hashStr(s) {
+    let hash = 0;
+    for (let i = 0; i < s.length; i++) {
+        hash = ((hash << 5) - hash) + s.charCodeAt(i);
+        hash |= 0;
+    }
+    return Math.abs(hash).toString(36);
+}
+
+function savePosition() {
+    if (!playerState.tabId || playerState.sentences.length === 0) return;
+    chrome.tabs.get(playerState.tabId).then(tab => {
+        if (tab && tab.url) {
+            const key = 'pos_' + hashStr(tab.url);
+            chrome.storage.local.set({
+                [key]: {
+                    url: tab.url,
+                    index: playerState.currentIndex,
+                    timestamp: Date.now()
+                }
+            });
+        }
+    }).catch(() => {});
+}
+
+let testVoiceRetryCount = 0;
+const MAX_TEST_VOICE_RETRIES = 20;
 
 function testVoice() {
     const wasPlaying = playerState.isPlaying;
@@ -312,10 +515,17 @@ function testVoice() {
 
     const voices = window.speechSynthesis.getVoices();
     if (voices.length === 0) {
+        if (testVoiceRetryCount >= MAX_TEST_VOICE_RETRIES) {
+            testVoiceRetryCount = 0;
+            console.error("Offscreen: Max test voice retries reached.");
+            return;
+        }
         console.warn("Offscreen: Voices not loaded for test, waiting...");
+        testVoiceRetryCount++;
         setTimeout(testVoice, 100);
         return;
     }
+    testVoiceRetryCount = 0;
 
     if (playerState.settings.voiceName) {
         const v = voices.find(voice => voice.name === playerState.settings.voiceName);
@@ -335,9 +545,7 @@ function testVoice() {
 
     utter.onend = restoreState;
     utter.onerror = restoreState;
-    setTimeout(() => {
-        window.speechSynthesis.speak(utter);
-    }, 50);
+    window.speechSynthesis.speak(utter);
 }
 
 // --- Language Detection ---
@@ -350,7 +558,6 @@ function detectLanguage(text) {
                 return;
             }
             if (result && result.languages && result.languages.length > 0) {
-                // Return the language code with the highest percentage
                 resolve(result.languages[0].language);
             } else {
                 reject(new Error("Language could not be detected"));
@@ -358,3 +565,10 @@ function detectLanguage(text) {
         });
     });
 }
+
+// Auto-persist position periodically while playing
+setInterval(() => {
+    if (playerState.isPlaying && !playerState.isPaused) {
+        savePosition();
+    }
+}, 5000);

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Read Aloud Extension",
-  "version": "1.1",
+  "version": "1.2",
   "description": "A Text-to-Speech extension that reads web pages aloud.",
   "permissions": [
     "activeTab",
@@ -42,7 +42,7 @@
     "128": "assets/icons/icon-128.png"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self';"
+    "extension_pages": "script-src 'self'; object-src 'self'; wasm-unsafe-eval;"
   },
   "commands": {
     "play_stop": {
