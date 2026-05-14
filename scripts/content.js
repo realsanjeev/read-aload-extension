@@ -1,10 +1,34 @@
 // content.js - Optimized Content Extraction + Floating Mini-Player for Read Aloud Extension
 
+// Guard against duplicate injection (e.g. popup reopened, extension reloaded)
+if (window.__readAloudContentScriptLoaded) {
+    console.log("[ReadAloud] Content script already loaded, skipping re-injection.");
+} else {
+window.__readAloudContentScriptLoaded = true;
+
 console.log("[ReadAloud] Content script loaded.");
 
 let miniPlayer = null;
 let miniPlayerVisible = false;
 let currentSentenceText = "";
+
+/**
+ * Safely send a message to the extension runtime.
+ * Catches "Extension context invalidated" errors that occur after extension reload.
+ */
+function safeSendMessage(message, callback) {
+    try {
+        chrome.runtime.sendMessage(message, (response) => {
+            if (chrome.runtime.lastError) {
+                console.warn("[ReadAloud] Runtime error:", chrome.runtime.lastError.message);
+                return;
+            }
+            if (callback) callback(response);
+        });
+    } catch (e) {
+        console.warn("[ReadAloud] Extension context invalidated. Please reload the page.");
+    }
+}
 
 // Listen for messages from the popup / background / offscreen
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -82,13 +106,6 @@ function ensureMiniPlayer() {
         return;
     }
 
-    // Request current state when first creating the mini-player
-    chrome.runtime.sendMessage({ type: 'CMD_GET_STATE' }, (response) => {
-        if (response && response.state) {
-            updateMiniPlayer(response.state);
-        }
-    });
-
     const container = document.createElement('div');
     container.className = 'read-aloud-mini-player';
     container.id = 'readAloudMiniPlayer';
@@ -97,22 +114,23 @@ function ensureMiniPlayer() {
 
     container.innerHTML = `
         <button class="mini-btn mini-toggle" aria-label="Play or pause">
-            <svg class="mini-icon-play" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="currentColor" stroke-linecap="round" stroke-linejoin="round">
+            <svg class="mini-icon-play" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="currentColor" stroke-linecap="round" stroke-linejoin="round">
                 <polygon points="5 3 19 12 5 21 5 3"></polygon>
             </svg>
-            <svg class="mini-icon-pause hidden" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <svg class="mini-icon-pause hidden" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="currentColor" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="6" y="4" width="4" height="16"></rect>
                 <rect x="14" y="4" width="4" height="16"></rect>
             </svg>
         </button>
         <div class="mini-sentence" aria-live="polite" aria-atomic="true"></div>
         <button class="mini-btn mini-next" aria-label="Next sentence">
-            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="currentColor" stroke-linecap="round" stroke-linejoin="round">
                 <polygon points="5 4 15 12 5 20 5 4"></polygon>
+                <line x1="19" y1="5" x2="19" y2="19"></line>
             </svg>
         </button>
         <button class="mini-btn mini-stop" aria-label="Stop">
-            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="currentColor" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
             </svg>
         </button>
@@ -126,35 +144,28 @@ function ensureMiniPlayer() {
         style.textContent = `
             .read-aloud-mini-player {
                 position: fixed;
-                bottom: 24px;
-                right: 24px;
+                bottom: 32px;
+                right: 32px;
                 z-index: 2147483647;
                 display: flex;
                 align-items: center;
-                gap: 10px;
-                background: rgba(255,255,255,0.92);
-                backdrop-filter: blur(12px);
-                -webkit-backdrop-filter: blur(12px);
-                border: 1px solid rgba(0,0,0,0.08);
-                border-radius: 16px;
-                padding: 10px 14px;
-                box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+                gap: 12px;
+                background: rgba(30, 41, 59, 0.95);
+                backdrop-filter: blur(16px);
+                -webkit-backdrop-filter: blur(16px);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 20px;
+                padding: 10px 16px;
+                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
                 font-family: system-ui, -apple-system, sans-serif;
                 font-size: 0.85rem;
-                color: #0f172a;
-                transition: transform 0.3s ease, opacity 0.3s ease;
-                max-width: 300px;
+                color: #f1f5f9;
+                transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+                max-width: 320px;
                 line-height: 1.4;
             }
-            @media (prefers-color-scheme: dark) {
-                .read-aloud-mini-player {
-                    background: rgba(30, 41, 59, 0.92);
-                    border-color: rgba(255,255,255,0.08);
-                    color: #f1f5f9;
-                }
-            }
             .read-aloud-mini-player.hidden {
-                transform: translateY(20px);
+                transform: translateY(30px) scale(0.95);
                 opacity: 0;
                 pointer-events: none;
             }
@@ -164,54 +175,62 @@ function ensureMiniPlayer() {
                 overflow: hidden;
                 text-overflow: ellipsis;
                 font-weight: 500;
-                max-width: 160px;
+                max-width: 140px;
+                color: #f1f5f9;
             }
             .read-aloud-mini-player .mini-btn {
                 background: none;
                 border: none;
                 cursor: pointer;
-                color: #64748b;
+                color: #10b981;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                padding: 4px;
-                border-radius: 8px;
+                padding: 6px;
+                border-radius: 10px;
                 transition: all 0.2s;
+                opacity: 0.9;
             }
-            .read-aloud-mini-player .mini-btn:hover {
-                background: #f1f5f9;
-                color: #10b981;
+            .read-aloud-mini-player .mini-btn:hover:not(:disabled) {
+                background: rgba(16, 185, 129, 0.15);
+                color: #34d399;
+                transform: translateY(-1px);
+                opacity: 1;
             }
-            @media (prefers-color-scheme: dark) {
-                .read-aloud-mini-player .mini-btn {
-                    color: #94a3b8;
-                }
-                .read-aloud-mini-player .mini-btn:hover {
-                    background: #334155;
-                    color: #34d399;
-                }
+            .read-aloud-mini-player .mini-btn:disabled {
+                color: #64748b;
+                cursor: not-allowed;
+                opacity: 0.4;
+            }
+            .read-aloud-mini-player .mini-btn.active {
+                color: #34d399;
+                filter: drop-shadow(0 0 4px rgba(16, 185, 129, 0.4));
             }
             .read-aloud-mini-player .mini-close {
                 position: absolute;
-                top: -8px;
-                right: -8px;
-                width: 20px;
-                height: 20px;
+                top: -6px;
+                right: -6px;
+                width: 24px;
+                height: 24px;
                 border-radius: 50%;
-                background: #94a3b8;
+                background: #475569;
                 color: white;
-                font-size: 14px;
+                font-size: 16px;
+                font-weight: bold;
                 line-height: 1;
                 text-align: center;
                 cursor: pointer;
-                border: none;
+                border: 1px solid rgba(255, 255, 255, 0.1);
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 padding: 0;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+                transition: all 0.2s;
             }
             .read-aloud-mini-player .mini-close:hover {
                 background: #ef4444;
+                transform: scale(1.1);
             }
             .read-aloud-mini-player .hidden {
                 display: none;
@@ -229,15 +248,23 @@ function ensureMiniPlayer() {
     miniPlayer = container;
     miniPlayerVisible = true;
 
+    // Request current state now that miniPlayer is in the DOM,
+    // so re-entrancy via updateMiniPlayer → ensureMiniPlayer is safe.
+    safeSendMessage({ type: 'CMD_GET_STATE' }, (response) => {
+        if (response && response.state) {
+            updateMiniPlayer(response.state);
+        }
+    });
+
     // Event listeners
     container.querySelector('.mini-toggle').addEventListener('click', () => {
-        chrome.runtime.sendMessage({ type: 'CMD_TOGGLE_PLAY' });
+        safeSendMessage({ type: 'CMD_TOGGLE_PLAY' });
     });
     container.querySelector('.mini-next').addEventListener('click', () => {
-        chrome.runtime.sendMessage({ type: 'CMD_NEXT' });
+        safeSendMessage({ type: 'CMD_NEXT' });
     });
     container.querySelector('.mini-stop').addEventListener('click', () => {
-        chrome.runtime.sendMessage({ type: 'CMD_STOP' });
+        safeSendMessage({ type: 'CMD_STOP' });
         hideMiniPlayer();
     });
     container.querySelector('.mini-close').addEventListener('click', () => {
@@ -273,14 +300,26 @@ function updateMiniPlayer(state) {
         currentSentenceText = sentence;
     }
 
-    // Toggle play/pause icon
+    // Toggle play/pause icon and active state
+    const toggleBtn = miniPlayer.querySelector('.mini-toggle');
     const playIcon = miniPlayer.querySelector('.mini-icon-play');
     const pauseIcon = miniPlayer.querySelector('.mini-icon-pause');
+    
     if (isPlaying) {
         playIcon.classList.add('hidden');
         pauseIcon.classList.remove('hidden');
+        toggleBtn.classList.add('active');
     } else {
         playIcon.classList.remove('hidden');
         pauseIcon.classList.add('hidden');
+        toggleBtn.classList.remove('active');
+    }
+
+    // Handle next button disabled state
+    const nextBtn = miniPlayer.querySelector('.mini-next');
+    if (nextBtn) {
+        nextBtn.disabled = state.currentIndex >= (state.totalSentences - 1);
     }
 }
+
+} // end guard: window.__readAloudContentScriptLoaded
