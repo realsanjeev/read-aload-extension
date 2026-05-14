@@ -185,8 +185,7 @@ function tokenizeSentences(text) {
             result.push(current.trim());
         }
 
-        const validSentences = result.filter(s => s.length > 0);
-        sentences.push(...validSentences);
+        sentences.push(...result);
     });
 
     return { sentences, lineBreaks };
@@ -267,6 +266,8 @@ function togglePlay() {
 function togglePause() {
     if (playerState.isPlaying && !playerState.isPaused) {
         pause();
+    } else if (!playerState.isPlaying && playerState.isPaused) {
+        play();
     }
 }
 
@@ -335,15 +336,15 @@ function prevParagraph() {
 }
 
 function speakCurrentSentence() {
+    if (isSpeaking) return;
+    isSpeaking = true;
+
     if (playerState.utterance) {
         playerState.utterance.onend = null;
         playerState.utterance.onerror = null;
         playerState.utterance.onboundary = null;
     }
-    
-    if (isSpeaking) return;
-    isSpeaking = true;
-    
+
     window.speechSynthesis.cancel();
     
     if (playerState.sentences.length === 0 || playerState.currentIndex >= playerState.sentences.length) {

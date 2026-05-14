@@ -1,5 +1,5 @@
 // pdf-viewer.js - PDF Viewer with integrated TTS controls
-import { hashStr } from './utils.js';
+import { hashStr, debounce, getSavedPosition } from './utils.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('lib/pdf.worker.min.js');
 
@@ -59,15 +59,6 @@ const MAX_VOICE_RETRIES = 20;
 let pdfUrl = null;
 
 // --- Utilities ---
-function debounce(fn, delay) {
-  let timer = null;
-  return function (...args) {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      try { fn.apply(this, args); } catch (e) { console.error("Debounced fn error:", e); }
-    }, delay);
-  };
-}
 
 function isElementInViewport(el) {
   const rect = el.getBoundingClientRect();
@@ -299,12 +290,6 @@ function togglePlayIcon(active) {
 // --- Resume Position ---
 
 
-async function getSavedPosition(url) {
-  if (!url) return null;
-  const key = 'pos_' + hashStr(url);
-  const data = await chrome.storage.local.get(key);
-  return data[key] || null;
-}
 
 // --- Settings & Voices ---
 
@@ -382,8 +367,7 @@ btnPlay.onclick = () => {
     setTimeout(() => textContent.classList.remove('shake'), 400);
     return;
   }
-  if (uiState.isPlaying && !uiState.isPaused) sendCommand('CMD_PAUSE');
-  else sendCommand('CMD_PLAY');
+  sendCommand('CMD_TOGGLE_PLAY');
 };
 
 btnStop.onclick = () => sendCommand('CMD_STOP');

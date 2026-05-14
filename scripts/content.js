@@ -82,13 +82,6 @@ function ensureMiniPlayer() {
         return;
     }
 
-    // Request current state when first creating the mini-player
-    chrome.runtime.sendMessage({ type: 'CMD_GET_STATE' }, (response) => {
-        if (response && response.state) {
-            updateMiniPlayer(response.state);
-        }
-    });
-
     const container = document.createElement('div');
     container.className = 'read-aloud-mini-player';
     container.id = 'readAloudMiniPlayer';
@@ -228,6 +221,14 @@ function ensureMiniPlayer() {
     document.body.appendChild(container);
     miniPlayer = container;
     miniPlayerVisible = true;
+
+    // Request current state now that miniPlayer is in the DOM,
+    // so re-entrancy via updateMiniPlayer → ensureMiniPlayer is safe.
+    chrome.runtime.sendMessage({ type: 'CMD_GET_STATE' }, (response) => {
+        if (response && response.state) {
+            updateMiniPlayer(response.state);
+        }
+    });
 
     // Event listeners
     container.querySelector('.mini-toggle').addEventListener('click', () => {

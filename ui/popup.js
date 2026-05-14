@@ -1,5 +1,5 @@
 // popup.js - UI Controller for Speak Aloud Extension
-import { hashStr } from './utils.js';
+import { hashStr, debounce, getSavedPosition } from './utils.js';
 
 // --- DOM Elements ---
 const btnPlay = document.getElementById('btnPlay');
@@ -61,16 +61,6 @@ let voiceRetryCount = 0;
 const MAX_VOICE_RETRIES = 20;
 const scriptInjectedTabs = new Set();
 
-// --- Utilities ---
-function debounce(fn, delay) {
-  let timer = null;
-  return function (...args) {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      try { fn.apply(this, args); } catch (e) { console.error("Debounced fn error:", e); }
-    }, delay);
-  };
-}
 
 function isElementInViewport(el) {
   const rect = el.getBoundingClientRect();
@@ -332,12 +322,6 @@ function togglePlayIcon(active) {
 // --- Resume Position ---
 
 
-async function getSavedPosition(url) {
-  if (!url) return null;
-  const key = 'pos_' + hashStr(url);
-  const data = await chrome.storage.local.get(key);
-  return data[key] || null;
-}
 
 function showResumePrompt(savedIndex, text, tabId, tabUrl) {
   resumePrompt.classList.remove('hidden');

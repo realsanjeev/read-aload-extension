@@ -20,7 +20,7 @@ async function ensureOffscreen() {
         documentUrls: [OFFSCREEN_DOCUMENT_PATH]
     });
 
-    if (existingContexts.length > 0) return;
+    if (existingContexts.length > 0) return Promise.resolve();
 
     offscreenCreating = (async () => {
         try {
